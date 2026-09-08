@@ -1,0 +1,38 @@
+# ==============================================================================
+# CONFIGURACIÓN CHIRPSTACK V4
+# ==============================================================================
+
+[logging]
+level = "info"
+
+[postgresql]
+dsn = "postgres://iot:changeme_db_password@postgres:5432/iot?sslmode=disable"
+max_open_connections = 10
+min_idle_connections = 2
+
+[redis]
+servers = ["redis://redis:6379"]
+
+[network]
+net_id = "000000"
+enabled_regions = ["eu868"]
+
+[api]
+bind = "0.0.0.0:8080"
+secret = "default_jwt_secret_for_chirpstack_change_in_production"
+
+# Integración MQTT con Mosquitto
+[integration]
+enabled = ["mqtt"]
+
+[integration.mqtt]
+server = "tcp://mosquitto:1883"
+json = true
+username = "chirpstack"
+password = "changeme"
+clean_session = true
+client_id = "chirpstack_v4_server"
+
+# Tópicos estructurados para eventos LoRaWAN
+event_topic = "application/{{application_id}}/device/{{dev_eui}}/event/{{event}}"
+command_topic = "application/{{application_id}}/device/{{dev_eui}}/command/{{command}}"

@@ -1,0 +1,26 @@
+# ==============================================================================
+# CONFIGURACIÓN CHIRPSTACK GATEWAY BRIDGE
+# ==============================================================================
+
+[general]
+log_level = 5
+
+# Backend UDP estándar Semtech Packet Forwarder
+[backend]
+type = "semtech_udp"
+
+[backend.semtech_udp]
+bind = "0.0.0.0:1700"
+
+# Integración MQTT con Mosquitto hacia ChirpStack
+[integration.mqtt.auth.generic]
+server = "tcp://mosquitto:1883"
+username = "chirpstack"
+password = "changeme"
+clean_session = true
+client_id = "chirpstack_gw_bridge"
+
+[integration.mqtt]
+event_topic_template = "eu868/gateway/{{ .GatewayID }}/event/{{ .EventType }}"
+state_topic_template = "eu868/gateway/{{ .GatewayID }}/state/{{ .StateType }}"
+command_topic_template = "eu868/gateway/{{ .GatewayID }}/command/{{ .CommandType }}"

@@ -1,0 +1,37 @@
+# ==============================================================================
+# CORNEA IoT — ficheros que NUNCA deben subirse a GitHub
+# ==============================================================================
+
+# --- Dependencias (se reinstalan con npm install) ---
+**/node_modules/
+
+# --- Artefactos de compilación ---
+**/dist/
+**/build/
+frontend/dist/
+backend/dist/
+backend/coverage/
+
+# --- Variables de entorno con secretos (usar los .env.example como plantilla) ---
+.env
+frontend/.env
+backend/.env
+simulator/.env
+*.env.local
+
+# --- Logs ---
+*.log
+npm-debug.log*
+
+# --- Sistema operativo / editores ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# --- Datos locales de Docker (volúmenes con nombre, por si se externalizan) ---
+pgdata/
+redisdata/
+mosquittodata/
+mosquittolog/

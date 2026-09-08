@@ -1,0 +1,229 @@
+version: '3.8'
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. BASE DE DATOS: PostgreSQL 16 + TimescaleDB
+  # ----------------------------------------------------------------------------
+  postgres:
+    image: timescale/timescaledb:latest-pg16
+    container_name: cornea_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-iot}
+      POSTGRES_USER: ${POSTGRES_USER:-iot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme_db_password}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/timescale/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-iot} -d ${POSTGRES_DB:-iot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cornea_net
+
+  # ----------------------------------------------------------------------------
+  # 2. CACHÉ & COLAS: Redis 7
+  # ----------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: cornea_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cornea_net
+
+  # ----------------------------------------------------------------------------
+  # 3. BROKER MQTT: Eclipse Mosquitto 2.x
+  # ----------------------------------------------------------------------------
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: cornea_mosquitto
+    restart: unless-stopped
+    volumes:
+      - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquittodata:/mosquitto/data
+      - mosquittolog:/mosquitto/log
+    entrypoint: >
+      /bin/sh -c "
+        rm -f /mosquitto/data/passwordfile &&
+        mosquitto_passwd -b -c /mosquitto/data/passwordfile ${MQTT_USERNAME:-iot} ${MQTT_PASSWORD:-changeme} &&
+        mosquitto_passwd -b /mosquitto/data/passwordfile chirpstack changeme &&
+        chown mosquitto:mosquitto /mosquitto/data/passwordfile &&
+        chmod 644 /mosquitto/data/passwordfile &&
+        exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
+      "
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    networks:
+      - cornea_net
+
+  # ----------------------------------------------------------------------------
+  # 4. LORAWAN NETWORK SERVER: ChirpStack v4
+  # ----------------------------------------------------------------------------
+  chirpstack:
+    image: chirpstack/chirpstack:4
+    container_name: cornea_chirpstack
+    restart: unless-stopped
+    command: -c /etc/chirpstack
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    volumes:
+      - ./docker/chirpstack:/etc/chirpstack:ro
+    environment:
+      - MQTT_BROKER_HOST=mosquitto
+      - REDIS_URL=redis://redis:6379
+      - POSTGRESQL_HOST=postgres
+      - POSTGRESQL_PORT=5432
+      - POSTGRESQL_DB_NAME=${POSTGRES_DB:-iot}
+      - POSTGRESQL_USER=${POSTGRES_USER:-iot}
+      - POSTGRESQL_PASSWORD=${POSTGRES_PASSWORD:-changeme_db_password}
+    ports:
+      - "8080:8080"
+    networks:
+      - cornea_net
+
+  chirpstack-gateway-bridge:
+    image: chirpstack/chirpstack-gateway-bridge:4
+    container_name: cornea_chirpstack_gw_bridge
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    volumes:
+      - ./docker/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml:/etc/chirpstack-gateway-bridge/chirpstack-gateway-bridge.toml:ro
+    ports:
+      - "1700:1700/udp"
+    networks:
+      - cornea_net
+
+  # ----------------------------------------------------------------------------
+  # 5. BACKEND API REST & REALTIME SSE/WEBSOCKETS
+  # ----------------------------------------------------------------------------
+  backend-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runner
+    container_name: cornea_backend_api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - NODE_ENV=production
+      - PORT=8000
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-iot}:${POSTGRES_PASSWORD:-changeme_db_password}@postgres:5432/${POSTGRES_DB:-iot}?schema=public
+      - REDIS_URL=redis://redis:6379
+      - MQTT_URL=mqtt://mosquitto:1883
+      - MQTT_USERNAME=${MQTT_USERNAME:-iot}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-changeme}
+      - JWT_SECRET=${JWT_SECRET:-super_secret_jwt_key_32_characters_minimum_entropy_random_hex}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
+      - API_KEY_INGEST=${API_KEY_INGEST:-secret_ingest_key_for_http_gateways_123456}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-alerts@example.com}
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cornea_net
+
+  # ----------------------------------------------------------------------------
+  # 6. BACKEND WORKER: TELEMETRY INGESTION & ALERT ENGINE
+  # ----------------------------------------------------------------------------
+  backend-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: runner
+    container_name: cornea_backend_worker
+    restart: unless-stopped
+    command: ["node", "dist/worker.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      mosquitto:
+        condition: service_started
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-iot}:${POSTGRES_PASSWORD:-changeme_db_password}@postgres:5432/${POSTGRES_DB:-iot}?schema=public
+      - REDIS_URL=redis://redis:6379
+      - MQTT_URL=mqtt://mosquitto:1883
+      - MQTT_USERNAME=${MQTT_USERNAME:-iot}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-changeme}
+      - MQTT_TOPIC_SUBSCRIPTION=application/+/device/+/event/up
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-alerts@example.com}
+      - ALERT_WEBHOOK_URL=${ALERT_WEBHOOK_URL:-}
+    networks:
+      - cornea_net
+
+  # ----------------------------------------------------------------------------
+  # 7. FRONTEND: React 18 + Vite + Nginx
+  # ----------------------------------------------------------------------------
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=${VITE_API_URL:-http://localhost:8000/api/v1}
+    container_name: cornea_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend-api
+    ports:
+      - "3000:80"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:80/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    networks:
+      - cornea_net
+
+volumes:
+  pgdata:
+    driver: local
+  redisdata:
+    driver: local
+  mosquittodata:
+    driver: local
+  mosquittolog:
+    driver: local
+
+networks:
+  cornea_net:
+    driver: bridge

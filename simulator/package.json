@@ -1,0 +1,16 @@
+{
+  "name": "lorawan-sensor-simulator",
+  "version": "1.0.0",
+  "description": "Simulador de sensores y gateways LoRaWAN para pruebas de integración — CORNEA by Neutron Insights",
+  "main": "mock-lora-devices.js",
+  "scripts": {
+    "start": "node mock-lora-devices.js",
+    "simulate:5min": "node mock-lora-devices.js",
+    "simulate:anomalies": "node mock-lora-devices.js --anomalies",
+    "simulate:fast": "node mock-lora-devices.js --interval 5000 --anomalies",
+    "load-test": "node mock-lora-devices.js --count 100 --interval 2000"
+  },
+  "dependencies": {
+    "mqtt": "^5.3.4"
+  }
+}
