@@ -172,10 +172,18 @@ cp .env.example .env
 # 3. Construir y levantar el stack
 docker compose up -d --build
 
-# 4. Ver estado / logs
+# 4. Sembrar datos demo (OBLIGATORIO la primera vez o tras `down -v`)
+cd backend && npm install && npm run seed && cd ..
+
+# 5. Ver estado / logs
 docker compose ps
 docker compose logs -f backend-api
 ```
+
+> Sin el paso 4 la tabla `users` queda vacía y el login devuelve
+> `401 Credenciales inválidas` aunque todos los contenedores estén en verde
+> (el `init.sql` solo crea el esquema; el seed crea usuarios, sondas, reglas
+> e histórico de 48 h).
 
 Abrir:
 - Dashboard: <http://localhost:3000> (admin@example.com / admin123456)
@@ -469,6 +477,7 @@ Copiar `cp .env.example .env` y ajustar. Las más relevantes:
 
 | Síntoma | Causa probable | Acción |
 |---|---|---|
+| Login `401 Credenciales inválidas` con stack en verde | Volumen de Postgres fresco sin seed (`users` vacía) | `cd backend && npm install && npm run seed` (solo la primera vez) |
 | `Port 3000 is in use` en `npm run dev` | Otro proceso/contenedor ocupa el 3000 | `netstat -ano \| findstr :3000` y libera, o usa el puerto alternativo que propone Vite |
 | Página en blanco tras `npm run dev` | Faltaba el plugin React / módulos vacíos (ya corregido) | `npm install` + recargar; revisa la consola del navegador |
 | Login 401 / redirección a `/login` | Token caducado o backend caído | Comprueba `docker compose ps` y `:8000/health` |
