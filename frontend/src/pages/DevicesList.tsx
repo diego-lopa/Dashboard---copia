@@ -20,8 +20,8 @@ import {
   X,
   Check,
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
 import { es, enUS } from 'date-fns/locale';
+import { formatRelative } from '../utils/dates';
 import { formatBattery } from '../utils/battery';
 import { deviceStatusLabel } from '../utils/labels';
 
@@ -314,10 +314,7 @@ export const DevicesList: React.FC = () => {
 
                     <td className={`py-3.5 px-4 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                       {dev.last_seen_at
-                        ? formatDistanceToNow(new Date(dev.last_seen_at), {
-                            addSuffix: true,
-                            locale: dateLocale,
-                          })
+                        ? formatRelative(dev.last_seen_at, { addSuffix: true, locale: dateLocale })
                         : t('never')}
                     </td>
 

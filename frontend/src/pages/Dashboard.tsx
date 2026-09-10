@@ -22,10 +22,11 @@ import {
   ShieldAlert,
   Check,
 } from 'lucide-react';
-import { formatDistanceToNow } from 'date-fns';
 import { es, enUS } from 'date-fns/locale';
 import { batteryPercent, isLowBattery } from '../utils/battery';
 import { deviceStatusLabel, severityLabel } from '../utils/labels';
+import { normalizeAlertEvent } from '../utils/realtime';
+import { formatRelative } from '../utils/dates';
 
 export const Dashboard: React.FC = () => {
   const { t, language } = useLanguage();
@@ -89,7 +90,9 @@ export const Dashboard: React.FC = () => {
       );
     } else if (event.type === 'alert') {
       if (event.data.state === 'triggered') {
-        setAlerts((prev) => [event.data, ...prev.filter((a) => a.id !== event.data.id)]);
+        // El SSE llega en camelCase: normalizar a AlertEvent antes de guardarlo
+        const normalized = normalizeAlertEvent(event.data, event.ts);
+        setAlerts((prev) => [normalized, ...prev.filter((a) => a.id !== normalized.id)]);
       } else if (event.data.state === 'resolved') {
         setAlerts((prev) => prev.filter((a) => a.id !== event.data.id));
       }
@@ -240,7 +243,7 @@ export const Dashboard: React.FC = () => {
                   <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>{al.message}</p>
                   <p className={`text-[10px] mt-1 flex items-center gap-1 ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
                     <Clock className="w-3 h-3" />
-                    {formatDistanceToNow(new Date(al.triggered_at), { addSuffix: true, locale: dateLocale })}
+                    {formatRelative(al.triggered_at, { addSuffix: true, locale: dateLocale })}
                   </p>
                 </div>
                 <button

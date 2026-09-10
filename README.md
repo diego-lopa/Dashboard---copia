@@ -478,6 +478,7 @@ Copiar `cp .env.example .env` y ajustar. Las más relevantes:
 | Síntoma | Causa probable | Acción |
 |---|---|---|
 | Login `401 Credenciales inválidas` con stack en verde | Volumen de Postgres fresco sin seed (`users` vacía) | `cd backend && npm install && npm run seed` (solo la primera vez) |
+| Pantalla en negro al llegar una alerta | (Corregido) El SSE enviaba claves `camelCase` y el formateo de fechas lanzaba sin red de seguridad | `utils/realtime.ts` normaliza el evento, `utils/dates.ts` nunca lanza y `components/ErrorBoundary.tsx` muestra panel de recuperación |
 | `Port 3000 is in use` en `npm run dev` | Otro proceso/contenedor ocupa el 3000 | `netstat -ano \| findstr :3000` y libera, o usa el puerto alternativo que propone Vite |
 | Página en blanco tras `npm run dev` | Faltaba el plugin React / módulos vacíos (ya corregido) | `npm install` + recargar; revisa la consola del navegador |
 | Login 401 / redirección a `/login` | Token caducado o backend caído | Comprueba `docker compose ps` y `:8000/health` |

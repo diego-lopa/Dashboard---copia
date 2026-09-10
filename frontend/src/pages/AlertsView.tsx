@@ -12,7 +12,7 @@ import {
   Sliders,
   History,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import { formatDateTime } from '../utils/dates';
 import { alertStateLabel, severityLabel } from '../utils/labels';
 
 export const AlertsView: React.FC = () => {
@@ -207,13 +207,11 @@ export const AlertsView: React.FC = () => {
                     <td className={`py-3 px-4 font-mono font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{ev.value}</td>
 
                     <td className={`py-3 px-4 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                      {format(new Date(ev.triggered_at), 'dd/MM/yyyy HH:mm:ss')}
+                      {formatDateTime(ev.triggered_at)}
                     </td>
 
                     <td className={`py-3 px-4 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                      {ev.resolved_at
-                        ? format(new Date(ev.resolved_at), 'dd/MM/yyyy HH:mm:ss')
-                        : '--'}
+                      {formatDateTime(ev.resolved_at)}
                     </td>
 
                     <td className={`py-3 px-4 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>

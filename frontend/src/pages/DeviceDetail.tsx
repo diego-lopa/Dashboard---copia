@@ -19,6 +19,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import { format, subHours, subDays } from 'date-fns';
+import { formatDateTime } from '../utils/dates';
 import { batteryPercent, batteryThresholdUnit } from '../utils/battery';
 import { deviceStatusLabel } from '../utils/labels';
 
@@ -388,9 +389,7 @@ export const DeviceDetail: React.FC = () => {
               {telemetry.slice(0, 100).map((row, idx) => (
                 <tr key={idx} className={`transition ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
                   <td className={`py-2 px-4 font-mono text-[11px] ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                    {row.bucket || row.time
-                      ? format(new Date(row.bucket || row.time || ''), 'yyyy-MM-dd HH:mm:ss')
-                      : '--'}
+                    {formatDateTime(row.bucket || row.time || '', 'yyyy-MM-dd HH:mm:ss')}
                   </td>
                   <td className="py-2 px-4 text-emerald-500 font-medium">
                     {row.avg_humidity ?? row.humidity ?? '--'}%

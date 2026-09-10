@@ -2,6 +2,7 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ThemeProvider } from './context/ThemeContext';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { LanguageProvider } from './context/LanguageContext';
 import { AppLayout } from './components/layout/AppLayout';
 import { Login } from './pages/Login';
@@ -31,10 +32,11 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; requiredRole?: strin
 
 export const App: React.FC = () => {
   return (
-    <ThemeProvider>
-      <LanguageProvider>
-        <AuthProvider>
-          <BrowserRouter>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <LanguageProvider>
+          <AuthProvider>
+            <BrowserRouter>
             <Routes>
               <Route path="/login" element={<Login />} />
 
@@ -63,10 +65,11 @@ export const App: React.FC = () => {
 
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-          </BrowserRouter>
-        </AuthProvider>
-      </LanguageProvider>
-    </ThemeProvider>
+            </BrowserRouter>
+          </AuthProvider>
+        </LanguageProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 };
 
