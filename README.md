@@ -162,9 +162,10 @@ Todas las rutas son **relativas a la raíz** (sin dependencias de máquina):
 
 ### 4.1. Todo con Docker (1 comando)
 
-```bash
+```powershell
 # 1. Clonar y entrar (ruta relativa a donde lo clones)
-git clone <URL-del-repo> cornea && cd cornea
+git clone <URL-del-repo> cornea
+cd cornea
 
 # 2. Variables de entorno (los valores demo ya vienen listos)
 cp .env.example .env
@@ -172,8 +173,10 @@ cp .env.example .env
 # 3. Construir y levantar el stack
 docker compose up -d --build
 
-# 4. Sembrar datos demo (OBLIGATORIO la primera vez o tras `down -v`)
-cd backend && npm install && npm run seed && cd ..
+# 4. Sembrar datos demo (OBLIGATORIO la primera vez o tras `down -v`).
+#    Se usa `npm --prefix` para que funcione igual en PowerShell, cmd y bash.
+npm --prefix backend install
+npm --prefix backend run seed
 
 # 5. Ver estado / logs
 docker compose ps
@@ -219,7 +222,9 @@ npm run simulate:fast    # 5 sensores cada 5 s con anomalías → verás datos e
 
 > Requiere Postgres/TimescaleDB, Redis y Mosquitto accesibles (levántalos con
 > `docker compose up -d postgres redis mosquitto` si no los tienes en local).
-> Para crear el esquema y los datos demo: `cd backend && npm run seed`.
+> Para crear el esquema y los datos demo: `npm --prefix backend run seed`
+> (`--prefix` ejecuta el script en esa carpeta y funciona igual en
+> PowerShell, cmd y bash).
 
 ### 4.3. Credenciales demo (seed)
 
@@ -410,13 +415,17 @@ reales de Galicia, deriva de batería (3.85 V → mín. 2.9 V), RSSI/SNR realist
 y anomalías programadas para probar la histéresis. Detalle completo en
 `simulator/readme.md`.
 
-```bash
-cd simulator && npm install
-npm run simulate:fast        # 5 sondas cada 5 s + anomalías (ideal para demo)
-npm run simulate:anomalies   # cada 5 min + anomalías
-npm run load-test            # 100 sondas cada 2 s (carga)
-node mock-lora-devices.js --count 20 --interval 10000 --url mqtt://<broker>:1883 --user iot --pass changeme
+```powershell
+npm --prefix simulator install
+npm --prefix simulator run simulate:fast     # 5 sondas cada 5 s + anomalías (ideal para demo)
+npm --prefix simulator run simulate:anomalies
+npm --prefix simulator run load-test         # 100 sondas cada 2 s (carga)
+# Ejemplo avanzado (ejecutar dentro de simulator/):
+# node mock-lora-devices.js --count 20 --interval 10000 --url mqtt://<broker>:1883 --user iot --pass changeme
 ```
+
+> `npm --prefix <carpeta>` funciona igual en PowerShell, cmd y bash, sin
+> necesidad de `cd` ni de `&&` (no soportado en PowerShell 5.1).
 
 Variables: `MQTT_URL` (def. `mqtt://localhost:1883`), `MQTT_USERNAME`,
 `MQTT_PASSWORD` o flags `--url/--user/--pass/--count/--interval/--anomalies`.
@@ -477,7 +486,7 @@ Copiar `cp .env.example .env` y ajustar. Las más relevantes:
 
 | Síntoma | Causa probable | Acción |
 |---|---|---|
-| Login `401 Credenciales inválidas` con stack en verde | Volumen de Postgres fresco sin seed (`users` vacía) | `cd backend && npm install && npm run seed` (solo la primera vez) |
+| Login `401 Credenciales inválidas` con stack en verde | Volumen de Postgres fresco sin seed (`users` vacía) | `npm --prefix backend install` + `npm --prefix backend run seed` (solo la primera vez) |
 | Pantalla en negro al llegar una alerta | (Corregido) El SSE enviaba claves `camelCase` y el formateo de fechas lanzaba sin red de seguridad | `utils/realtime.ts` normaliza el evento, `utils/dates.ts` nunca lanza y `components/ErrorBoundary.tsx` muestra panel de recuperación |
 | `Port 3000 is in use` en `npm run dev` | Otro proceso/contenedor ocupa el 3000 | `netstat -ano \| findstr :3000` y libera, o usa el puerto alternativo que propone Vite |
 | Página en blanco tras `npm run dev` | Faltaba el plugin React / módulos vacíos (ya corregido) | `npm install` + recargar; revisa la consola del navegador |
