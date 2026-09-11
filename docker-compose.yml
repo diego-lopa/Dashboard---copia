@@ -139,6 +139,8 @@ services:
       - MQTT_PASSWORD=${MQTT_PASSWORD:-changeme}
       # La API NO se suscribe a MQTT (solo el worker) para no duplicar ingesta
       - MQTT_SUBSCRIBE=false
+      # Minutos sin datos antes de marcar offline (sondas cada 30 min)
+      - OFFLINE_THRESHOLD_MINUTES=${OFFLINE_THRESHOLD_MINUTES:-90}
       - JWT_SECRET=${JWT_SECRET:-super_secret_jwt_key_32_characters_minimum_entropy_random_hex}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
       - API_KEY_INGEST=${API_KEY_INGEST:-secret_ingest_key_for_http_gateways_123456}
@@ -188,6 +190,8 @@ services:
       - MQTT_TOPIC_SUBSCRIPTION=application/+/device/+/event/up
       # Único suscriptor MQTT del stack (la API lo lleva desactivado)
       - MQTT_SUBSCRIBE=true
+      # Minutos sin datos antes de marcar offline (sondas cada 30 min)
+      - OFFLINE_THRESHOLD_MINUTES=${OFFLINE_THRESHOLD_MINUTES:-90}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}

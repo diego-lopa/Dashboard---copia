@@ -388,7 +388,8 @@ Tablas de apoyo: `tenants`, `users`, `devices` (umbrales
 
 `backend/src/modules/devices/devices.service.ts` (`findAll`/`findOne`) calcula:
 
-- `offline` si está deshabilitada o sin datos > 15 min,
+- `offline` si está deshabilitada o sin datos > 90 min (`OFFLINE_THRESHOLD_MINUTES`,
+  debe superar la cadencia de emisión: sondas cada 30 min),
 - `warning` si hay alertas activas o batería bajo umbral,
 - `online` en otro caso,
 - más `latest_*` (última medición) y `active_alerts`.

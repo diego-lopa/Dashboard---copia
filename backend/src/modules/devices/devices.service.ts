@@ -1,11 +1,21 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../../database/database.service';
 import { CreateDeviceDto, UpdateDeviceDto } from './dto/create-device.dto';
 import { DeviceEntity } from '../../shared/types';
 
 @Injectable()
 export class DevicesService {
-  constructor(private readonly db: DatabaseService) {}
+  constructor(
+    private readonly db: DatabaseService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  /** Instante a partir del cual una sonda sin datos se considera offline. */
+  private offlineCutoffIso(): string {
+    const minutes = this.configService.get<number>('offline.thresholdMinutes') || 90;
+    return new Date(Date.now() - minutes * 60 * 1000).toISOString();
+  }
 
   async findAll(tenantId: string): Promise<DeviceEntity[]> {
     // Consulta optimizada extrayendo la última medición de cada sensor y estado de alertas activas
@@ -48,7 +58,7 @@ export class DevicesService {
         COALESCE(ac.alert_count, 0)::int as active_alerts,
         CASE
           WHEN NOT d.enabled THEN 'offline'
-          WHEN d.last_seen_at IS NULL OR d.last_seen_at < (now() - interval '15 minutes') THEN 'offline'
+          WHEN d.last_seen_at IS NULL OR d.last_seen_at < $2::timestamptz THEN 'offline'
           WHEN COALESCE(ac.alert_count, 0) > 0 THEN 'warning'
           WHEN lm.latest_battery IS NOT NULL AND lm.latest_battery <= d.battery_threshold THEN 'warning'
           ELSE 'online'
@@ -60,7 +70,7 @@ export class DevicesService {
       WHERE d.tenant_id = $1
       ORDER BY d.name ASC;
     `;
-    const res = await this.db.query(query, [tenantId]);
+    const res = await this.db.query(query, [tenantId, this.offlineCutoffIso()]);
     return res.rows;
   }
 
@@ -109,7 +119,7 @@ export class DevicesService {
         COALESCE(ac.alert_count, 0)::int as active_alerts,
         CASE
           WHEN NOT d.enabled THEN 'offline'
-          WHEN d.last_seen_at IS NULL OR d.last_seen_at < (now() - interval '15 minutes') THEN 'offline'
+          WHEN d.last_seen_at IS NULL OR d.last_seen_at < $3::timestamptz THEN 'offline'
           WHEN COALESCE(ac.alert_count, 0) > 0 THEN 'warning'
           WHEN lm.latest_battery IS NOT NULL AND lm.latest_battery <= d.battery_threshold THEN 'warning'
           ELSE 'online'
@@ -120,7 +130,7 @@ export class DevicesService {
       LEFT JOIN active_alerts_count ac ON ac.device_id = d.id
       WHERE d.id = $1 AND d.tenant_id = $2;
     `;
-    const res = await this.db.query(query, [id, tenantId]);
+    const res = await this.db.query(query, [id, tenantId, this.offlineCutoffIso()]);
     if (res.rows.length === 0) {
       throw new NotFoundException('Dispositivo no encontrado');
     }

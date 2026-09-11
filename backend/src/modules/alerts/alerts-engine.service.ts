@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../../database/database.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -12,6 +13,7 @@ export class AlertsEngineService {
     private readonly db: DatabaseService,
     private readonly realtime: RealtimeService,
     private readonly notifications: NotificationsService,
+    private readonly configService: ConfigService,
   ) {}
 
   /**
@@ -183,13 +185,18 @@ export class AlertsEngineService {
    */
   async checkOfflineDevices() {
     try {
-      const offlineThresholdMinutes = 15;
-      const res = await this.db.query(`
+      const offlineThresholdMinutes =
+        this.configService.get<number>('offline.thresholdMinutes') || 90;
+      const cutoff = new Date(Date.now() - offlineThresholdMinutes * 60 * 1000).toISOString();
+      const res = await this.db.query(
+        `
         SELECT d.id, d.tenant_id, d.name, d.dev_eui, d.group_name, d.last_seen_at
         FROM devices d
-        WHERE d.enabled = true 
-          AND (d.last_seen_at IS NULL OR d.last_seen_at < (now() - interval '${offlineThresholdMinutes} minutes'))
-      `);
+        WHERE d.enabled = true
+          AND (d.last_seen_at IS NULL OR d.last_seen_at < $1::timestamptz)
+      `,
+        [cutoff],
+      );
 
       for (const dev of res.rows) {
         this.realtime.broadcastDeviceStatus(

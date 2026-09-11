@@ -357,7 +357,6 @@ export const DeviceDetail: React.FC = () => {
             humidityMin={device.humidity_min_threshold}
             humidityMax={device.humidity_max_threshold}
             title={`${device.name}`}
-            subtitle={`${telemetry.length} ${t('samples_label').toLowerCase()}`}
           />
         )}
       </div>

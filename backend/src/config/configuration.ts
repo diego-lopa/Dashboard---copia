@@ -30,6 +30,11 @@ export default () => ({
   security: {
     apiKeyIngest: process.env.API_KEY_INGEST || 'secret_ingest_key_for_http_gateways_123456',
   },
+  offline: {
+    // Minutos sin datos antes de marcar una sonda como offline.
+    // Debe superar la cadencia de emisión (sondas reales: 30 min → 90 por defecto).
+    thresholdMinutes: parseInt(process.env.OFFLINE_THRESHOLD_MINUTES, 10) || 90,
+  },
   smtp: {
     host: process.env.SMTP_HOST || '',
     port: parseInt(process.env.SMTP_PORT, 10) || 587,

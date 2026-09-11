@@ -11,7 +11,6 @@ interface TelemetryChartProps {
   humidityMin?: number;
   humidityMax?: number;
   title?: string;
-  subtitle?: string;
 }
 
 export const TelemetryChart: React.FC<TelemetryChartProps> = ({
@@ -19,7 +18,6 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   humidityMin = 15,
   humidityMax = 85,
   title,
-  subtitle,
 }) => {
   const { theme } = useTheme();
   const { t } = useLanguage();
@@ -50,9 +48,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
     backgroundColor: 'transparent',
     title: {
       text: chartTitle,
-      subtext: subtitle || '',
-      textStyle: { color: isDark ? '#F8FAFC' : '#0F172A', fontSize: 13, fontWeight: '600', overflow: 'truncate', width: 480 },
-      subtextStyle: { color: isDark ? '#94A3B8' : '#64748B', fontSize: 11 },
+      textStyle: { color: isDark ? '#F8FAFC' : '#0F172A', fontSize: 13, fontWeight: '600' },
       left: '0',
       top: '0',
     },
