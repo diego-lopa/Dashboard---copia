@@ -92,6 +92,7 @@ export const AdminView: React.FC = () => {
   const [devEui, setDevEui] = useState('0011223344556601');
   const [format, setFormat] = useState<'chirpstack' | 'simple'>('chirpstack');
   const [humidity, setHumidity] = useState('62.4');
+  const [neutrons, setNeutrons] = useState('');
   const [temperature, setTemperature] = useState('23.1');
   const [battery, setBattery] = useState('3.82');
   const [pressure, setPressure] = useState('1013.2');
@@ -181,11 +182,15 @@ export const AdminView: React.FC = () => {
     }
   };
 
+  const neutronValue = neutrons.trim() === '' ? undefined : num(neutrons, 0);
+
   const buildPayload = () => {
     if (format === 'simple') {
       return {
         devEui: devEui.trim().toUpperCase(),
         humidity: num(humidity, 0),
+        // Si se informa N_raw, el backend calcula θ con el modelo Geant4
+        ...(neutronValue !== undefined ? { neutron_counts: neutronValue } : {}),
         temperature: num(temperature, 0),
         battery: num(battery, 0),
         pressure: num(pressure, 0),
@@ -210,6 +215,8 @@ export const AdminView: React.FC = () => {
       fPort: 2,
       object: {
         humidity: num(humidity, 0),
+        // Si se informa N_raw, el backend calcula θ con el modelo Geant4
+        ...(neutronValue !== undefined ? { neutron_counts: neutronValue } : {}),
         temperature: num(temperature, 0),
         battery: num(battery, 0),
         pressure: num(pressure, 0),
@@ -652,6 +659,17 @@ export const AdminView: React.FC = () => {
               <div>
                 <label className={labelCls(isDark)}>{t('battery')} (V)</label>
                 <input type="number" step="any" value={battery} onChange={(e) => setBattery(e.target.value)} className={inputCls(isDark)} />
+              </div>
+              <div>
+                <label className={labelCls(isDark)}>{t('neutron_label')} (n/s)</label>
+                <input
+                  type="number"
+                  step="any"
+                  value={neutrons}
+                  onChange={(e) => setNeutrons(e.target.value)}
+                  placeholder="—"
+                  className={inputCls(isDark)}
+                />
               </div>
               <div>
                 <label className={labelCls(isDark)}>{t('pressure_label')} (hPa)</label>

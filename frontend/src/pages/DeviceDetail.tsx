@@ -17,6 +17,8 @@ import {
   Wifi,
   Radio,
   MapPin,
+  Zap,
+  Ruler,
 } from 'lucide-react';
 import { format, subHours, subDays } from 'date-fns';
 import { formatDateTime } from '../utils/dates';
@@ -106,6 +108,7 @@ export const DeviceDetail: React.FC = () => {
               latest_battery: event.data.battery ?? prev.latest_battery,
               latest_rssi: event.data.rssi ?? prev.latest_rssi,
               latest_snr: event.data.snr ?? prev.latest_snr,
+              latest_neutron_counts: event.data.neutron_counts ?? prev.latest_neutron_counts,
               last_seen_at: event.data.timestamp || new Date().toISOString(),
               status: 'online',
             }
@@ -153,6 +156,12 @@ export const DeviceDetail: React.FC = () => {
       </div>
     );
   }
+
+  // Profundidad efectiva de medida CRNS: D86 = 12.4 / (0.3 + θ/100) [cm]
+  const d86 =
+    device.latest_humidity !== undefined && device.latest_humidity !== null
+      ? +(12.4 / (0.3 + device.latest_humidity / 100)).toFixed(1)
+      : null;
 
   return (
     <div className="space-y-6">
@@ -206,7 +215,39 @@ export const DeviceDetail: React.FC = () => {
       </div>
 
       {/* Live Metrics Grid Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {/* Neutrones CRNS (N_raw) */}
+        <div className="glass-card p-3.5 rounded-2xl border bg-gradient-to-br from-indigo-500/10 to-purple-500/10 border-indigo-500/30">
+          <div className="flex items-center justify-between mb-1">
+            <span className={`text-[11px] font-semibold ${isDark ? 'text-indigo-300' : 'text-indigo-900'}`}>
+              {t('neutron_label')}
+            </span>
+            <Zap className="w-4 h-4 text-indigo-400 animate-breathe" />
+          </div>
+          <p className="text-xl font-bold text-indigo-400">
+            {device.latest_neutron_counts !== undefined && device.latest_neutron_counts !== null
+              ? `${device.latest_neutron_counts} n/s`
+              : '--'}
+          </p>
+          <p className={`text-[10px] mt-1 ${isDark ? 'text-indigo-300/80' : 'text-indigo-700'}`}>
+            N₀=143 · Geant4
+          </p>
+        </div>
+
+        {/* Profundidad efectiva D86 */}
+        <div className="glass-card p-3.5 rounded-2xl border">
+          <div className="flex items-center justify-between mb-1">
+            <span className={`text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
+              {t('d86_label')}
+            </span>
+            <Ruler className="w-4 h-4 text-teal-400" />
+          </div>
+          <p className="text-xl font-bold text-teal-400">{d86 !== null ? `${d86} cm` : '--'}</p>
+          <p className={`text-[10px] mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+            {device.latest_humidity !== undefined ? `θ ${device.latest_humidity}%` : '--'}
+          </p>
+        </div>
+
         {/* Humedad */}
         <div className="glass-card p-3.5 rounded-2xl border">
           <div className="flex items-center justify-between mb-1">

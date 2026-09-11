@@ -1,0 +1,18 @@
+{
+  "detector_id": "detector_bipolo_sionlla_superficie",
+  "descripcion": "Detector 2 Capas (HDPE/BHDPE) sobre tierra - Calibración Geant4 (0%-80%)",
+  "modelo_ajuste": "exponential",
+  "N0_suelo_seco": 143.0,
+  "parametros": {
+    "a0": 107.38107297640175,
+    "a1": 3.0361746292354415,
+    "a2": -4.894223415942227
+  },
+  "metricas_ajuste": {
+    "rmse": 3.5438705724681783,
+    "r2": 0.9687189752312487
+  },
+  "longitud_atenuacion_L": 137.0,
+  "presion_referencia_P0": 981.4,
+  "fecha_actualizacion": "2026-09-10T10:05:05.569830+00:00"
+}

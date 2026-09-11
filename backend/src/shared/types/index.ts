@@ -29,6 +29,8 @@ export interface DeviceEntity {
   latest_battery?: number;
   latest_rssi?: number;
   latest_snr?: number;
+  /** Último recuento bruto de neutrones CRNS (n/s). */
+  latest_neutron_counts?: number;
   status?: 'online' | 'warning' | 'critical' | 'offline';
 }
 
@@ -47,6 +49,8 @@ export interface MeasurementRecord {
   fcnt_up?: number;
   raw_payload?: string;
   valid?: boolean;
+  /** Recuento bruto de neutrones del detector CRNS (n/s). */
+  neutron_counts?: number;
 }
 
 export interface NormalizedUplink {
@@ -63,6 +67,9 @@ export interface NormalizedUplink {
   gatewayId?: string;
   fCntUp?: number;
   rawPayload?: string;
+  /** Recuento bruto de neutrones del detector CRNS (n/s). Si viene
+   * informado, la humedad se calcula con el modelo calibrado Geant4. */
+  neutron_counts?: number;
 }
 
 export interface RealtimeEventPayload {

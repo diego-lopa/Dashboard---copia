@@ -79,7 +79,7 @@ Todas las rutas son **relativas a la raíz** (sin dependencias de máquina):
 ├── .env                         # ⚠️ NO se commitea (ver .gitignore). Crear desde .env.example
 ├── .env.example                 # Plantilla de variables (valores demo)
 ├── .gitignore                   # Excluye node_modules, dist, .env, logs…
-├── docker-compose.yml           # Stack completo (8 servicios, rutas relativas ./docker/…)
+├── docker-compose.yml           # Stack completo (9 servicios, rutas relativas ./docker/…)
 │
 ├── docker/                      # Configuración de infraestructura
 │   ├── timescale/init.sql       # Esquema: tenants, users, devices, measurements (hypertable),
@@ -133,8 +133,11 @@ Todas las rutas son **relativas a la raíz** (sin dependencias de máquina):
 │                                #   MapView, AlertsView, AdminView
 │
 └── simulator/                   # Generador de tráfico LoRaWAN sin hardware (Node + mqtt)
-    ├── package.json             # start, simulate:5min, simulate:anomalies, simulate:fast, load-test
+    ├── Dockerfile               # Imagen del servicio `simulator` (auto-arranque en compose)
+    ├── package.json             # start (30 min), simulate:30min/5min/anomalies/fast/neutrons/load-test
     ├── mock-lora-devices.js     # Sensores virtuales → ChirpStack v4 JSON → MQTT
+    │                            # (+ modo --neutrons: N_raw con ruido Poisson; intervalo vía
+    │                            # INTERVAL_MS/SENSOR_COUNT/NEUTRON_MODE/INJECT_ANOMALIES o flags CLI)
     └── readme.md                # Documentación propia del simulador
 ```
 
@@ -146,7 +149,7 @@ Todas las rutas son **relativas a la raíz** (sin dependencias de máquina):
 
 - **Docker Engine 24+** y **Docker Compose v2** (`docker compose version`).
 - Puertos libres: `3000, 8000, 8080, 1883, 9001, 5432, 6379, 1700/udp`.
-- ~2 GB RAM libres para los 8 contenedores.
+- ~2 GB RAM libres para los 9 contenedores.
 
 ### Opción B — Desarrollo local por piezas
 
@@ -187,6 +190,11 @@ docker compose logs -f backend-api
 > `401 Credenciales inválidas` aunque todos los contenedores estén en verde
 > (el `init.sql` solo crea el esquema; el seed crea usuarios, sondas, reglas
 > e histórico de 48 h).
+>
+> El seed (`backend/src/database/seeds/seed.ts`, reejecutable) registra las
+> 5 sondas como **«Sonda 0X · \<lugar reconocible\>»** (código numérico del
+> DevEUI + identificativo) con umbrales agronómicos de Galicia **20–65 %**;
+> al reejecutarlo actualiza nombres y umbrales de las ya existentes.
 
 Abrir:
 - Dashboard: <http://localhost:3000> (admin@example.com / admin123456)
@@ -264,6 +272,25 @@ npm run simulate:fast    # 5 sensores cada 5 s con anomalías → verás datos e
        y/o `data` base64),
      - **JSON genérico** (`devEUI`/`devEui` + `humidity/temperature/battery/pressure/lat/lon/rssi/snr`),
      - **Binario compacto** (6 bytes big-endian: humedad×0.1, temp×0.1, batería×0.001 V).
+   - **Vía neutrónica CRNS**: si el payload trae `neutron_counts` (alias
+     `neutrons`, `n_raw`, `neutron_count`), el codec calcula la humedad con el
+     modelo Geant4 calibrado — **válido para todas las sondas por igual** — e
+     ignora la humedad directa:
+     1. `fp = exp((P₀ − P) / L)` con `P₀ = 981.4 hPa`, `L = 137.0`
+        (`cornea_pipeline/engine/corrections.py` en el proyecto de referencia);
+     2. `N_corr = N_raw · fp`; `ratio = N_corr / N₀` con `N₀ = 143.0`;
+     3. `θ(%) = a₀·e^(−a₁·ratio) + a₂` con `a₀ = 107.381…`, `a₁ = 3.036…`,
+        `a₂ = −4.894…` (clamp 0–100).
+   - **Calibración maestra**: `cornea_pipeline/config/calibration_config.json`
+     (en este repo), montado en los contenedores del backend como
+     `/cornea_pipeline/config/calibration_config.json` (`docker-compose.yml`).
+     El backend lo relee en cada cálculo (`getCalibrationConfig()`); si falta,
+     usa estos mismos valores como fallback. Al recalibrar en Geant4 basta
+     actualizar el JSON (sin reconstruir la imagen).
+   - **Suavizado EMA**: `ingestion.service.ts` aplica por dispositivo
+     `θ_suav = 0.3·θ_inst + 0.7·θ_prev` (α = 0.3) contra el ruido de Poisson;
+     se persiste la humedad **suavizada**, las alertas se evalúan sobre ella y
+     el SSE difunde `neutron_counts` junto a la telemetría.
    - `backend/src/modules/ingestion/ingestion.service.ts`:
      - `processRawMessage()` → `ingestNormalizedUplink()` produce un
        `NormalizedUplink` (`shared/types`),
@@ -313,8 +340,18 @@ Esquema en `docker/timescale/init.sql`. Tabla principal:
 ```sql
 measurements(time, device_id, humidity, temperature, pressure, battery,
              latitude, longitude, rssi, snr, gateway_id, fcnt_up,
-             raw_payload, valid)   -- hypertable particionada por time
+             raw_payload, valid,
+             neutron_counts)       -- N_raw del detector CRNS (n/s, NULL si no aplica)
+                                   -- hypertable particionada por time
 ```
+
+> La columna `neutron_counts` la crea `docker/timescale/init.sql` en
+> instalaciones frescas. En BD ya creadas, aplicar la migración idempotente:
+>
+> ```powershell
+> Get-Content docker/timescale/migrations/002_add_neutron_counts.sql -Raw |
+>   docker exec -i cornea_postgres psql -U iot -d iot
+> ```
 
 Tablas de apoyo: `tenants`, `users`, `devices` (umbrales
 `humidity_min/max_threshold`, `battery_threshold`, `last_seen_at`),
@@ -355,6 +392,12 @@ El KPI «Batería Baja» usa `isLowBattery()`: umbrales **> 15 se leen como %**
 - **CSV**: `GET /api/v1/devices/:id/export/csv` (botón en la ficha).
 - **Mapa**: `frontend/src/components/map/SensorMap.tsx` (react-leaflet +
   OpenStreetMap en ambos temas, zoom con rueda, popup por sonda).
+- **Física CRNS en la ficha** (`frontend/src/pages/DeviceDetail.tsx`):
+  tarjeta **N_raw (n/s)** con el último recuento (vía REST
+  `latest_neutron_counts` o SSE en vivo) y tarjeta **D86** con la profundidad
+  efectiva `D₈₆ = 12.4 / (0.3 + θ/100)` cm calculada de la humedad suavizada.
+  El histórico expone `neutron_counts` (raw) y `avg_neutron_counts` (buckets)
+  y el CSV incluye ambas columnas.
 
 ---
 
@@ -417,9 +460,16 @@ y anomalías programadas para probar la histéresis. Detalle completo en
 
 ```powershell
 npm --prefix simulator install
-npm --prefix simulator run simulate:fast     # 5 sondas cada 5 s + anomalías (ideal para demo)
+npm --prefix simulator run simulate:fast      # 5 sondas cada 5 s + anomalías (ideal para demo)
 npm --prefix simulator run simulate:anomalies
-npm --prefix simulator run load-test         # 100 sondas cada 2 s (carga)
+npm --prefix simulator run simulate:neutrons  # modo CRNS: envía N_raw y el backend calcula θ
+npm --prefix simulator run load-test          # 100 sondas cada 2 s (carga)
+```
+
+> Con Docker no hace falta arrancarlo a mano: el servicio `simulator` del
+> compose (modo neutrónico + anomalías cada 30 min, como las sondas físicas)
+> envía la primera ráfaga nada más conectar, así que la tarjeta N_raw se
+> rellena sola al levantar el stack. `SIM_INTERVAL_MS` lo acelera.
 # Ejemplo avanzado (ejecutar dentro de simulator/):
 # node mock-lora-devices.js --count 20 --interval 10000 --url mqtt://<broker>:1883 --user iot --pass changeme
 ```
@@ -445,7 +495,9 @@ curl -X POST http://localhost:8000/api/v1/ingest/gateway \
 ```
 
 El mismo envío puede hacerse desde **Administración → Probador de Ingesta**
-(formato ChirpStack v4 o JSON simple, con generador de cURL).
+(formato ChirpStack v4 o JSON simple, con generador de cURL). El campo
+opcional **N_raw (n/s)** hace que el backend calcule θ con el modelo Geant4
+en lugar de usar la humedad del formulario (válido para cualquier sonda).
 
 ---
 
@@ -490,6 +542,8 @@ Copiar `cp .env.example .env` y ajustar. Las más relevantes:
 | Pantalla en negro al llegar una alerta | (Corregido) El SSE enviaba claves `camelCase` y el formateo de fechas lanzaba sin red de seguridad | `utils/realtime.ts` normaliza el evento, `utils/dates.ts` nunca lanza y `components/ErrorBoundary.tsx` muestra panel de recuperación |
 | `Port 3000 is in use` en `npm run dev` | Otro proceso/contenedor ocupa el 3000 | `netstat -ano \| findstr :3000` y libera, o usa el puerto alternativo que propone Vite |
 | Página en blanco tras `npm run dev` | Faltaba el plugin React / módulos vacíos (ya corregido) | `npm install` + recargar; revisa la consola del navegador |
+| Tarjeta N_raw en `--` pero D86 sí se muestra | No hay tráfico neutrónico: el simulador va en modo humedad y/o la BD solo tiene histórico sin `neutron_counts` (D86 deriva de θ, por eso sí aparece) | Arrancar `npm --prefix simulator run simulate:neutrons` o enviar `neutron_counts` desde el probador de ingesta. Con Docker, el servicio `simulator` ya lo hace solo |
+| Dos simuladores a la vez mezclan tráficos | Un simulador en host (humedad) + el servicio `simulator` (neutrones) compiten: el `latest` salta de uno a otro y el EMA mezcla ambos | Quedarse con uno solo: detener el de host (Ctrl+C) o pasarlo a `--neutrons`. `latest_neutron_counts` devuelve el último N no nulo aunque el tráfico sea mixto |
 | Login 401 / redirección a `/login` | Token caducado o backend caído | Comprueba `docker compose ps` y `:8000/health` |
 | Sin datos en tiempo real | Mosquitto caído o SSE bloqueado | Admin → Estado de servicios; `docker compose logs mosquitto backend-worker` |
 | Simulador `connack timeout` | Broker inaccesible / credenciales | Verifica `:1883`, `MQTT_USERNAME/PASSWORD` o flags `--user/--pass` |

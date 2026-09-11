@@ -27,7 +27,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   const chartTitle = title || t('chart_title_olivos');
   const humidityLabel = `${t('soil_moisture')} (%)`;
   const temperatureLabel = `${t('temperature')} (°C)`;
-  const batteryLabel = `${t('battery')} (V)`;
+  const neutronLabel = t('neutron_label');
 
   const timestamps = data.map((d) => {
     const rawTime = d.bucket || d.time || '';
@@ -41,7 +41,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
 
   const humidities = data.map((d) => d.avg_humidity ?? d.humidity ?? null);
   const temperatures = data.map((d) => d.avg_temperature ?? d.temperature ?? null);
-  const batteries = data.map((d) => d.avg_battery ?? d.battery ?? null);
+  const neutrons = data.map((d) => d.avg_neutron_counts ?? d.neutron_counts ?? null);
 
   const option = {
     backgroundColor: 'transparent',
@@ -61,7 +61,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
       },
     },
     legend: {
-      data: [humidityLabel, temperatureLabel, batteryLabel],
+      data: [humidityLabel, temperatureLabel, neutronLabel],
       textStyle: { color: isDark ? '#94A3B8' : '#334155' },
       top: '0',
       right: '0',
@@ -114,11 +114,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
       },
       {
         type: 'value',
-        name: batteryLabel,
+        name: 'N (n/s)',
         nameTextStyle: { color: isDark ? '#94A3B8' : '#334155', fontSize: 11 },
         position: 'right',
-        min: 2.5,
-        max: 4.5,
         axisLine: { lineStyle: { color: isDark ? '#334155' : '#CBD5E1' } },
         axisLabel: { color: isDark ? '#94A3B8' : '#334155', fontSize: 11 },
         splitLine: { show: false },
@@ -174,14 +172,14 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
         lineStyle: { width: 2, color: '#F59E0B' },
       },
       {
-        name: batteryLabel,
+        name: neutronLabel,
         type: 'line',
         yAxisIndex: 1,
         smooth: true,
         showSymbol: false,
-        data: batteries,
-        itemStyle: { color: '#8B5CF6' },
-        lineStyle: { width: 1.5, type: 'dotted', color: '#8B5CF6' },
+        data: neutrons,
+        itemStyle: { color: '#818CF8' },
+        lineStyle: { width: 2, color: '#818CF8' },
       },
     ],
   };

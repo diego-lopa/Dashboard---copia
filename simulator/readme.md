@@ -36,7 +36,9 @@ Este simulador emula el comportamiento de sensores IoT reales que se comunican m
 - 🌍 **Sensores realistas**: Simula hasta 100+ dispositivos con ubicaciones en Galicia (Pontevedra y Santiago)
 - 📊 **Datos variables**: Genera fluctuaciones naturales en temperatura, humedad y batería
 - 🚨 **Inyección de anomalías**: Modo para probar sistemas de detección de fallos
-- 🔄 **Intervalos configurables**: Desde milisegundos (testing) hasta minutos (producción)
+- 🔄 **Intervalos configurables**: Desde milisegundos (testing) hasta 30 minutos (producción, como las sondas físicas)
+- ⚛️ **Modo neutrónico CRNS**: Envía `neutron_counts` y el backend calcula θ con Geant4 (`--neutrons` o `NEUTRON_MODE=true`)
+- 🐳 **Arranque automático con Docker**: Servicio `simulator` en `docker-compose.yml` (primera ráfaga inmediata al conectar)
 - 📡 **Compatible con ChirpStack v4**: Formato de payload estándar
 -  **Autenticación MQTT**: Soporte para usuario/contraseña
 - 📍 **Geolocalización**: Cada sensor incluye coordenadas GPS simuladas
@@ -90,10 +92,11 @@ MQTT_URL=mqtt://localhost:1883
 MQTT_USERNAME=iot
 MQTT_PASSWORD=changeme
 
-# Configuración por defecto
+# Configuración (las variables de entorno tienen prioridad sobre los flags CLI)
 SENSOR_COUNT=5
-INTERVAL_MS=300000
+INTERVAL_MS=1800000
 INJECT_ANOMALIES=true
+NEUTRON_MODE=true
 ```
 
 **Nota:** Las variables de entorno tienen prioridad sobre los argumentos CLI.
@@ -116,15 +119,15 @@ mosquitto -v
 
 ### Comandos Básicos
 
-#### 1. Modo Producción (5 minutos reales)
+#### 1. Modo Producción (30 minutos reales, como las sondas físicas)
 
 ```bash
-npm run simulate:5min
+npm run simulate:30min
 # o
 node mock-lora-devices.js
 ```
 
-**Resultado:** 5 sensores enviando datos cada 5 minutos.
+**Resultado:** 5 sensores enviando datos cada 30 minutos (primera ráfaga inmediata).
 
 #### 2. Modo Anomalías (Testing de alertas)
 
@@ -392,22 +395,26 @@ Bytes: `[0x02, 0xAC, 0x00, 0xE7, 0x0F, 0x08]`
 
 | Comando | Descripción | Intervalo | Sensores | Anomalías |
 |---------|-------------|-----------|----------|-----------|
-| `npm start` | Alias de simulate:5min | 5 min | 5 | ❌ |
-| `npm run simulate:5min` | Modo producción | 5 min | 5 | ❌ |
+| `npm start` | Modo producción (como sondas físicas) | 30 min | 5 | ✅ |
+| `npm run simulate:30min` | Modo producción | 30 min | 5 | ✅ |
+| `npm run simulate:5min` | Intervalo medio | 5 min | 5 | ✅ |
 | `npm run simulate:anomalies` | Testing de alertas | 5 min | 5 | ✅ |
 | `npm run simulate:fast` | Desarrollo/Debug | 5 seg | 5 | ✅ |
+| `npm run simulate:neutrons` | Modo CRNS (θ desde N_raw en backend) | 5 seg | 5 | ✅ |
 | `npm run load-test` | Prueba de carga | 2 seg | 100 | ❌ |
 
 ### Argumentos CLI
 
-| Argumento | Alias | Tipo | Por defecto | Descripción |
-|-----------|-------|------|-------------|-------------|
-| `--url` | | String | `mqtt://localhost:1883` | URL del broker MQTT |
-| `--user` | | String | `iot` | Usuario MQTT |
-| `--pass` | | String | `changeme` | Contraseña MQTT |
-| `--count` | | Integer | `5` | Número de sensores a simular |
-| `--interval` | | Integer | `300000` | Intervalo en ms entre envíos |
-| `--anomalies` | | Flag | `false` | Activar inyección de anomalías |
+| Argumento | Var. entorno | Tipo | Por defecto | Descripción |
+|-----------|--------------|------|-------------|-------------|
+| `--url` | `MQTT_URL` | String | `mqtt://localhost:1883` | URL del broker MQTT |
+| `--user` | `MQTT_USERNAME` | String | `iot` | Usuario MQTT |
+| `--pass` | `MQTT_PASSWORD` | String | `changeme` | Contraseña MQTT |
+| `--count` | `SENSOR_COUNT` | Integer | `5` | Número de sensores a simular |
+| `--interval` | `INTERVAL_MS` | Integer | `1800000` (30 min) | Intervalo en ms entre envíos (acelerar tiempo con valores bajos) |
+| `--anomalies` | `INJECT_ANOMALIES` | Flag | `false` | Activar inyección de anomalías |
+| `--neutrons` | `NEUTRON_MODE` | Flag | `false` | Enviar `neutron_counts` para que el backend calcule θ |
+| `--neutrons` | | Flag | `false` | Modo CRNS: envía `neutron_counts` (N_raw con ruido Poisson) y el backend calcula θ con el modelo Geant4 (`cornea_pipeline/config/calibration_config.json`, N₀=143.0) |
 
 **Ejemplos avanzados:**
 

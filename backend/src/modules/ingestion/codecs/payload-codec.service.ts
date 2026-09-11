@@ -1,9 +1,91 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { NormalizedUplink } from '../../../shared/types';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Injectable()
 export class PayloadCodecService {
   private readonly logger = new Logger(PayloadCodecService.name);
+
+  /**
+   * Carga dinámica de la calibración CRNS desde
+   * cornea_pipeline/config/calibration_config.json (montado en Docker como
+   * /cornea_pipeline/config/calibration_config.json). Si no se encuentra,
+   * usa los valores maestros del JSON como fallback.
+   */
+  private getCalibrationConfig(): any {
+    try {
+      const possiblePaths = [
+        '/cornea_pipeline/config/calibration_config.json',
+        path.resolve(process.cwd(), '../cornea_pipeline/config/calibration_config.json'),
+        path.resolve(process.cwd(), '../../cornea_pipeline/config/calibration_config.json'),
+        path.resolve(process.cwd(), './cornea_pipeline/config/calibration_config.json'),
+      ];
+
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          const raw = fs.readFileSync(p, 'utf8');
+          return JSON.parse(raw);
+        }
+      }
+    } catch (err) {
+      this.logger.warn(`No se pudo leer calibration_config.json dinámicamente: ${err.message}`);
+    }
+
+    // Fallback = valores maestros del calibration_config.json (Geant4, R²=0.9687)
+    return {
+      N0_suelo_seco: 143.0,
+      modelo_ajuste: 'exponential',
+      parametros: {
+        a0: 107.38107297640175,
+        a1: 3.0361746292354415,
+        a2: -4.894223415942227,
+      },
+      presion_referencia_P0: 981.4,
+      longitud_atenuacion_L: 137.0,
+    };
+  }
+
+  /**
+   * Convierte recuento bruto de neutrones a % de humedad volumétrica:
+   *   1. fp = exp((P0 - P) / L) ; N_corr = N_raw * fp
+   *   2. ratio = N_corr / N0
+   *   3. θ(%) = a0 * e^(-a1 * ratio) + a2   (modelo Geant4 calibrado)
+   */
+  public calculateMoistureFromNeutrons(nRaw: number, pressureHpa: number = 981.4): number {
+    const cfg = this.getCalibrationConfig();
+    const N0 = cfg.N0_suelo_seco ?? 143.0;
+    const modelo = cfg.modelo_ajuste ?? 'exponential';
+    const params = cfg.parametros ?? {};
+    const P0 = cfg.presion_referencia_P0 ?? 981.4;
+    const L = cfg.longitud_atenuacion_L ?? 137.0;
+
+    // 1. Corrección barométrica
+    const fPresion = Math.exp((P0 - pressureHpa) / L);
+    const nCorr = nRaw * fPresion;
+
+    // 2. Ratio adimensional
+    const ratio = N0 > 0 ? nCorr / N0 : 1.0;
+
+    // 3. Ecuación de calibración
+    let theta = 0;
+    const a0 = params.a0 ?? 107.38107297640175;
+    const a1 = params.a1 ?? 3.0361746292354415;
+    const a2 = params.a2 ?? -4.894223415942227;
+
+    if (modelo === 'exponential') {
+      theta = a0 * Math.exp(-a1 * ratio) + a2;
+    } else if (modelo === 'hyperbolic' || modelo === 'desilets') {
+      const denom = Math.abs(ratio - a1) < 1e-6 ? 1e-6 : ratio - a1;
+      theta = a0 / denom - a2;
+    } else if (modelo === 'quadratic') {
+      theta = a0 + a1 * ratio + a2 * Math.pow(ratio, 2);
+    } else {
+      theta = a0 * Math.exp(-a1 * ratio) + a2;
+    }
+
+    return Math.max(0.0, Math.min(100.0, +theta.toFixed(2)));
+  }
 
   /**
    * Decodifica y normaliza un mensaje proveniente de ChirpStack o Ingesta HTTP directa
@@ -42,13 +124,24 @@ export class PayloadCodecService {
     let longitude: number | undefined;
 
     // Si ChirpStack ya decodificó el payload mediante codec JavaScript
+    let rawNeutrons: number | undefined;
     if (msg.object) {
-      humidity = this.parseNumber(msg.object.humidity ?? msg.object.soil_moisture ?? msg.object.hum);
       temperature = this.parseNumber(msg.object.temperature ?? msg.object.temp);
       pressure = this.parseNumber(msg.object.pressure ?? msg.object.barometer);
       battery = this.parseNumber(msg.object.battery ?? msg.object.batt ?? msg.object.battery_voltage);
       latitude = this.parseNumber(msg.object.latitude ?? msg.object.lat);
       longitude = this.parseNumber(msg.object.longitude ?? msg.object.lon ?? msg.object.lng);
+
+      // Si vienen neutrones CRNS (neutron_counts / neutrons / n_raw),
+      // la humedad se calcula con el modelo Geant4 calibrado
+      rawNeutrons = this.parseNumber(
+        msg.object.neutron_counts ?? msg.object.neutrons ?? msg.object.n_raw ?? msg.object.neutron_count,
+      );
+      if (rawNeutrons !== undefined) {
+        humidity = this.calculateMoistureFromNeutrons(rawNeutrons, pressure ?? 981.4);
+      } else {
+        humidity = this.parseNumber(msg.object.humidity ?? msg.object.soil_moisture ?? msg.object.hum);
+      }
     }
 
     // Si viene payload binario en Base64 y no hay objeto decodificado, decodificar buffer
@@ -73,6 +166,7 @@ export class PayloadCodecService {
       gatewayId: rxInfo.gatewayId,
       fCntUp: msg.fCnt,
       rawPayload: msg.data || JSON.stringify(msg.object),
+      neutron_counts: rawNeutrons,
     };
   }
 
@@ -80,12 +174,20 @@ export class PayloadCodecService {
     const devEui = (msg.devEUI || msg.devEui).toUpperCase();
     const ts = msg.timestamp || msg.time || new Date().toISOString();
 
-    let humidity = this.parseNumber(msg.humidity ?? msg.soil_moisture ?? msg.hum);
     let temperature = this.parseNumber(msg.temperature ?? msg.temp);
     let pressure = this.parseNumber(msg.pressure);
     let battery = this.parseNumber(msg.battery ?? msg.batt);
     let latitude = this.parseNumber(msg.latitude ?? msg.lat);
     let longitude = this.parseNumber(msg.longitude ?? msg.lon ?? msg.lng);
+
+    // Si vienen neutrones CRNS, la humedad se calcula con el modelo Geant4
+    const rawNeutrons = this.parseNumber(msg.neutron_counts ?? msg.neutrons ?? msg.n_raw ?? msg.neutron_count);
+    let humidity: number | undefined;
+    if (rawNeutrons !== undefined) {
+      humidity = this.calculateMoistureFromNeutrons(rawNeutrons, pressure ?? 981.4);
+    } else {
+      humidity = this.parseNumber(msg.humidity ?? msg.soil_moisture ?? msg.hum);
+    }
 
     // Si viene rawPayload en base64
     if (msg.rawPayload && (humidity === undefined || temperature === undefined)) {
@@ -109,6 +211,7 @@ export class PayloadCodecService {
       gatewayId: msg.gatewayId || msg.gateway_id,
       fCntUp: msg.fCntUp || msg.fcnt_up,
       rawPayload: msg.rawPayload || (typeof msg === 'string' ? msg : JSON.stringify(msg)),
+      neutron_counts: rawNeutrons,
     };
   }
 

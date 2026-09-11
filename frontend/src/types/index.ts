@@ -29,6 +29,8 @@ export interface Device {
   latest_rssi?: number;
   latest_snr?: number;
   latest_gateway?: string;
+  /** Último recuento bruto de neutrones CRNS (n/s). */
+  latest_neutron_counts?: number;
   status: 'online' | 'warning' | 'critical' | 'offline';
   active_alerts?: number;
 }
@@ -52,6 +54,10 @@ export interface TelemetryPoint {
   avg_pressure?: number;
   avg_rssi?: number;
   samples?: number;
+  /** Recuento bruto de neutrones CRNS (n/s) en punto raw. */
+  neutron_counts?: number;
+  /** Media de N_raw en buckets agregados. */
+  avg_neutron_counts?: number;
 }
 
 export interface AlertRule {

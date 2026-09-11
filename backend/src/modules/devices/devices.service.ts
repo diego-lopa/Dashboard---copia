@@ -22,6 +22,15 @@ export class DevicesService {
         FROM measurements
         ORDER BY device_id, time DESC
       ),
+      -- Último N_raw no nulo (robusto ante tráfico mixto con/sin neutrones)
+      latest_neutrons AS (
+        SELECT DISTINCT ON (device_id)
+          device_id,
+          neutron_counts as latest_neutron_counts
+        FROM measurements
+        WHERE neutron_counts IS NOT NULL
+        ORDER BY device_id, time DESC
+      ),
       active_alerts_count AS (
         SELECT device_id, COUNT(*) as alert_count
         FROM alert_events
@@ -35,6 +44,7 @@ export class DevicesService {
         lm.latest_battery,
         lm.latest_rssi,
         lm.latest_snr,
+        ln.latest_neutron_counts,
         COALESCE(ac.alert_count, 0)::int as active_alerts,
         CASE
           WHEN NOT d.enabled THEN 'offline'
@@ -45,6 +55,7 @@ export class DevicesService {
         END as status
       FROM devices d
       LEFT JOIN latest_measurements lm ON lm.device_id = d.id
+      LEFT JOIN latest_neutrons ln ON ln.device_id = d.id
       LEFT JOIN active_alerts_count ac ON ac.device_id = d.id
       WHERE d.tenant_id = $1
       ORDER BY d.name ASC;
@@ -70,6 +81,15 @@ export class DevicesService {
         WHERE device_id = $1
         ORDER BY device_id, time DESC
       ),
+      -- Último N_raw no nulo (robusto ante tráfico mixto con/sin neutrones)
+      latest_neutrons AS (
+        SELECT DISTINCT ON (device_id)
+          device_id,
+          neutron_counts as latest_neutron_counts
+        FROM measurements
+        WHERE device_id = $1 AND neutron_counts IS NOT NULL
+        ORDER BY device_id, time DESC
+      ),
       active_alerts_count AS (
         SELECT device_id, COUNT(*) as alert_count
         FROM alert_events
@@ -85,6 +105,7 @@ export class DevicesService {
         lm.latest_rssi,
         lm.latest_snr,
         lm.latest_gateway,
+        ln.latest_neutron_counts,
         COALESCE(ac.alert_count, 0)::int as active_alerts,
         CASE
           WHEN NOT d.enabled THEN 'offline'
@@ -95,6 +116,7 @@ export class DevicesService {
         END as status
       FROM devices d
       LEFT JOIN latest_measurements lm ON lm.device_id = d.id
+      LEFT JOIN latest_neutrons ln ON ln.device_id = d.id
       LEFT JOIN active_alerts_count ac ON ac.device_id = d.id
       WHERE d.id = $1 AND d.tenant_id = $2;
     `;
@@ -119,6 +141,7 @@ export class DevicesService {
       battery: d.latest_battery,
       rssi: d.latest_rssi,
       snr: d.latest_snr,
+      neutron_counts: d.latest_neutron_counts,
     }));
   }
 

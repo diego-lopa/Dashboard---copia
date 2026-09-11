@@ -23,7 +23,7 @@ export class TelemetryService {
     // 2. Si se solicita datos raw (sin agregación)
     if (interval === 'raw') {
       const sql = `
-        SELECT 
+        SELECT
           time,
           humidity,
           temperature,
@@ -34,7 +34,8 @@ export class TelemetryService {
           rssi,
           snr,
           gateway_id,
-          fcnt_up
+          fcnt_up,
+          neutron_counts
         FROM measurements
         WHERE device_id = $1 AND time >= $2 AND time <= $3 AND valid = true
         ORDER BY time ASC
@@ -60,7 +61,7 @@ export class TelemetryService {
 
     // 4. Consulta con time_bucket de TimescaleDB
     const sql = `
-      SELECT 
+      SELECT
         time_bucket($1::interval, time) AS bucket,
         ROUND(AVG(humidity)::numeric, 2) AS avg_humidity,
         ROUND(MIN(humidity)::numeric, 2) AS min_humidity,
@@ -72,6 +73,7 @@ export class TelemetryService {
         ROUND(AVG(battery)::numeric, 2) AS avg_battery,
         ROUND(AVG(rssi)::numeric, 0) AS avg_rssi,
         ROUND(AVG(snr)::numeric, 1) AS avg_snr,
+        ROUND(AVG(neutron_counts)::numeric, 1) AS avg_neutron_counts,
         COUNT(*) AS samples
       FROM measurements
       WHERE device_id = $2 AND time >= $3 AND time <= $4 AND valid = true
@@ -108,6 +110,7 @@ export class TelemetryService {
         'RSSI (dBm)',
         'SNR (dB)',
         'FCntUp',
+        'NeutronCounts (n/s)',
       ];
 
       const csvLines = [headers.join(',')];
@@ -126,6 +129,7 @@ export class TelemetryService {
             r.rssi ?? '',
             r.snr ?? '',
             r.fcnt_up ?? '',
+            r.neutron_counts ?? '',
           ].join(','),
         );
       }
@@ -144,6 +148,7 @@ export class TelemetryService {
         'Avg Pressure (hPa)',
         'Avg Battery (V)',
         'Avg RSSI (dBm)',
+        'Avg NeutronCounts (n/s)',
         'Samples',
       ];
 
@@ -163,6 +168,7 @@ export class TelemetryService {
             r.avg_pressure ?? '',
             r.avg_battery ?? '',
             r.avg_rssi ?? '',
+            r.avg_neutron_counts ?? '',
             r.samples,
           ].join(','),
         );

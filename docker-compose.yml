@@ -127,6 +127,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - ./cornea_pipeline/config/calibration_config.json:/cornea_pipeline/config/calibration_config.json:ro
     environment:
       - NODE_ENV=production
       - PORT=8000
@@ -172,6 +174,8 @@ services:
         condition: service_healthy
       mosquitto:
         condition: service_started
+    volumes:
+      - ./cornea_pipeline/config/calibration_config.json:/cornea_pipeline/config/calibration_config.json:ro
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://${POSTGRES_USER:-iot}:${POSTGRES_PASSWORD:-changeme_db_password}@postgres:5432/${POSTGRES_DB:-iot}?schema=public
@@ -209,6 +213,33 @@ services:
       interval: 15s
       timeout: 5s
       retries: 3
+    networks:
+      - cornea_net
+
+  # ----------------------------------------------------------------------------
+  # 8. SIMULADOR DE SENSORES: tráfico demo automático (neutrones CRNS)
+  # ----------------------------------------------------------------------------
+  simulator:
+    build:
+      context: ./simulator
+      dockerfile: Dockerfile
+    container_name: cornea_simulator
+    restart: unless-stopped
+    depends_on:
+      mosquitto:
+        condition: service_started
+      backend-worker:
+        condition: service_started
+    environment:
+      - MQTT_URL=mqtt://mosquitto:1883
+      - MQTT_USERNAME=${MQTT_USERNAME:-iot}
+      - MQTT_PASSWORD=${MQTT_PASSWORD:-changeme}
+      - SENSOR_COUNT=${SIM_SENSOR_COUNT:-5}
+      # 30 min como las sondas físicas; primera ráfaga inmediata al conectar.
+      # Para acelerar el tiempo simulado, bajar SIM_INTERVAL_MS (p. ej. 5000).
+      - INTERVAL_MS=${SIM_INTERVAL_MS:-1800000}
+      - NEUTRON_MODE=${SIM_NEUTRON_MODE:-true}
+      - INJECT_ANOMALIES=${SIM_ANOMALIES:-true}
     networks:
       - cornea_net
 

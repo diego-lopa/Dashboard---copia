@@ -5,9 +5,11 @@
   "main": "mock-lora-devices.js",
   "scripts": {
     "start": "node mock-lora-devices.js",
-    "simulate:5min": "node mock-lora-devices.js",
-    "simulate:anomalies": "node mock-lora-devices.js --anomalies",
+    "simulate:30min": "node mock-lora-devices.js --interval 1800000 --anomalies",
+    "simulate:5min": "node mock-lora-devices.js --interval 300000 --anomalies",
+    "simulate:anomalies": "node mock-lora-devices.js --interval 300000 --anomalies",
     "simulate:fast": "node mock-lora-devices.js --interval 5000 --anomalies",
+    "simulate:neutrons": "node mock-lora-devices.js --interval 5000 --anomalies --neutrons",
     "load-test": "node mock-lora-devices.js --count 100 --interval 2000"
   },
   "dependencies": {

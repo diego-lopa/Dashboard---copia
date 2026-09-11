@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS measurements (
     fcnt_up BIGINT,
     raw_payload TEXT,
     valid BOOLEAN NOT NULL DEFAULT true,
+    neutron_counts DOUBLE PRECISION,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

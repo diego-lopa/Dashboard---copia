@@ -81,6 +81,7 @@ export const Dashboard: React.FC = () => {
               latest_battery: event.data.battery ?? dev.latest_battery,
               latest_rssi: event.data.rssi ?? dev.latest_rssi,
               latest_snr: event.data.snr ?? dev.latest_snr,
+              latest_neutron_counts: event.data.neutron_counts ?? dev.latest_neutron_counts,
               last_seen_at: event.data.timestamp || new Date().toISOString(),
               status: 'online',
             };

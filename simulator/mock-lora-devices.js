@@ -1,12 +1,15 @@
 /**
  * SIMULADOR DE SENSORES Y GATEWAYS LORAWAN (ChirpStack v4 + Mosquitto)
  * Desarrollado para CORNEA by Neutron Insights
- * 
- * Intervalo por defecto: 5 minutos reales (300.000 ms)
- * 
+ *
+ * Intervalo por defecto: 30 minutos reales (1.800.000 ms), como las sondas
+ * físicas. Para representación simulada se acelera el tiempo con --interval
+ * (p. ej. 5000 ms) o las variables de entorno INTERVAL_MS / NEUTRON_MODE.
+ *
  * Uso:
- *   node mock-lora-devices.js                             # Transmisión cada 5 minutos reales
+ *   node mock-lora-devices.js                             # Transmisión cada 30 minutos reales
  *   node mock-lora-devices.js --interval 5000             # Modo rápido para pruebas (5 seg)
+ *   node mock-lora-devices.js --interval 5000 --neutrons  # Modo neutrónico CRNS acelerado
  *   node mock-lora-devices.js --count 100 --interval 2000 # Prueba de carga
  */
 
@@ -22,10 +25,33 @@ const getArg = (flag, defaultVal) => {
 const MQTT_URL = process.env.MQTT_URL || getArg('--url', 'mqtt://localhost:1883');
 const MQTT_USER = process.env.MQTT_USERNAME || getArg('--user', 'iot');
 const MQTT_PASS = process.env.MQTT_PASSWORD || getArg('--pass', 'changeme');
-const SENSOR_COUNT = parseInt(getArg('--count', '5'), 10);
-// Por defecto: 5 minutos reales (300.000 ms)
-const INTERVAL_MS = parseInt(getArg('--interval', '300000'), 10);
-const INJECT_ANOMALIES = args.includes('--anomalies') || true;
+const SENSOR_COUNT = parseInt(process.env.SENSOR_COUNT || getArg('--count', '5'), 10);
+// Por defecto: 30 minutos reales (1.800.000 ms), como las sondas físicas.
+// Acelerar el tiempo simulado con --interval <ms> o INTERVAL_MS.
+const INTERVAL_MS = parseInt(process.env.INTERVAL_MS || getArg('--interval', '1800000'), 10);
+const INJECT_ANOMALIES =
+  process.env.INJECT_ANOMALIES === 'false' ? false : args.includes('--anomalies') || true;
+// Modo neutrónico CRNS: envía neutron_counts y el backend calcula θ con Geant4
+const NEUTRON_MODE = args.includes('--neutrons') || process.env.NEUTRON_MODE === 'true';
+
+// Calibración maestra (cornea_pipeline/config/calibration_config.json)
+const CAL = { N0: 143.0, a0: 107.38107297640175, a1: 3.0361746292354415, a2: -4.894223415942227 };
+
+// Gaussiana estándar (Box-Muller) para ruido de Poisson ~ sqrt(N)
+const gauss = () => {
+  let u = 0, v = 0;
+  while (!u) u = Math.random();
+  while (!v) v = Math.random();
+  return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+};
+
+// Inversa del modelo θ = a0·e^(-a1·N/N0) + a2  →  N(θ)
+const humidityToNeutrons = (theta) => {
+  const t = Math.min(99, Math.max(0.5, theta));
+  const x = (t - CAL.a2) / CAL.a0;
+  if (x <= 0) return Math.round(CAL.N0);
+  return Math.max(5, Math.round((-Math.log(x) / CAL.a1) * CAL.N0));
+};
 
 console.log('📡 =============================================================');
 console.log('   CORNEA IoT - SIMULADOR DE RED LORAWAN (Neutron Insights)');
@@ -34,6 +60,7 @@ console.log(`Broker MQTT: ${MQTT_URL}`);
 console.log(`Dispositivos activos: ${SENSOR_COUNT}`);
 console.log(`Intervalo de transmisión: ${INTERVAL_MS / 1000} segundos (${INTERVAL_MS / 60000} minutos reales)`);
 console.log(`Inyección de anomalías: ${INJECT_ANOMALIES ? 'ACTIVADA' : 'DESACTIVADA'}`);
+console.log(`Modo neutrónico CRNS: ${NEUTRON_MODE ? 'ACTIVADO (θ calculada en backend)' : 'DESACTIVADO'}`);
 console.log('-------------------------------------------------------------');
 
 // Ubicaciones de prueba en Galicia (Pontevedra y Santiago de Compostela)
@@ -91,6 +118,13 @@ const transmitUplinks = (tick) => {
       humidity = 24.5 - Math.random() * 2;
     }
 
+    // En modo neutrónico, derivar N_raw de la humedad objetivo + ruido Poisson
+    let neutronCounts;
+    if (NEUTRON_MODE) {
+      const nMean = humidityToNeutrons(humidity);
+      neutronCounts = Math.max(5, Math.round(nMean + gauss() * Math.sqrt(nMean)));
+    }
+
     sensor.fcnt++;
 
     // 2. Formatear mensaje como evento ChirpStack v4
@@ -118,6 +152,8 @@ const transmitUplinks = (tick) => {
       ]).toString('base64'),
       object: {
         humidity: +humidity.toFixed(2),
+        // En modo neutrónico el backend ignora `humidity` y calcula θ desde N_raw
+        ...(NEUTRON_MODE ? { neutron_counts: neutronCounts } : {}),
         temperature: +temperature.toFixed(2),
         battery: +battery.toFixed(2),
         pressure: 1013.2,

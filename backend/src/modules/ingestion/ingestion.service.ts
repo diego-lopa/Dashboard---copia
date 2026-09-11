@@ -8,6 +8,8 @@ import { NormalizedUplink } from '../../shared/types';
 @Injectable()
 export class IngestionService {
   private readonly logger = new Logger(IngestionService.name);
+  /** Última humedad suavizada por device.id (filtro EMA anti-ruido Poisson). */
+  private readonly smoothedHumidityMap = new Map<string, number>();
 
   constructor(
     private readonly db: DatabaseService,
@@ -48,18 +50,32 @@ export class IngestionService {
 
       const timestamp = uplink.timestamp ? new Date(uplink.timestamp).toISOString() : new Date().toISOString();
 
-      // 3. Persistir en TimescaleDB Hypertable
+      // 3. Suavizado Exponencial (EMA, α=0.3) contra ruido de Poisson del detector.
+      //    Todos los sensores se tratan igual: si la humedad se calculó desde
+      //    neutrones CRNS o vino directa, se suaviza antes de persistir.
+      let smoothedHumidity = uplink.humidity;
+      if (uplink.humidity !== undefined) {
+        const prevSmoothed = this.smoothedHumidityMap.get(device.id);
+        if (prevSmoothed !== undefined) {
+          const alpha = 0.3; // 30% lectura instantánea, 70% tendencia histórica
+          smoothedHumidity = +(alpha * uplink.humidity + (1 - alpha) * prevSmoothed).toFixed(2);
+        }
+        this.smoothedHumidityMap.set(device.id, smoothedHumidity);
+      }
+
+      // 3. Persistir en TimescaleDB Hypertable (humedad suavizada + N_raw)
       const insertSql = `
         INSERT INTO measurements (
           time, device_id, humidity, temperature, pressure, battery,
-          latitude, longitude, rssi, snr, gateway_id, fcnt_up, raw_payload, valid
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);
+          latitude, longitude, rssi, snr, gateway_id, fcnt_up, raw_payload, valid,
+          neutron_counts
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);
       `;
 
       await this.db.query(insertSql, [
         timestamp,
         device.id,
-        uplink.humidity !== undefined ? +uplink.humidity.toFixed(2) : null,
+        smoothedHumidity !== undefined ? +smoothedHumidity.toFixed(2) : null,
         uplink.temperature !== undefined ? +uplink.temperature.toFixed(2) : null,
         uplink.pressure !== undefined ? +uplink.pressure.toFixed(2) : null,
         uplink.battery !== undefined ? +uplink.battery.toFixed(2) : null,
@@ -71,6 +87,7 @@ export class IngestionService {
         uplink.fCntUp ?? null,
         uplink.rawPayload ?? null,
         isValid,
+        uplink.neutron_counts ?? null,
       ]);
 
       // 4. Actualizar last_seen_at y coordenadas en tabla devices
@@ -84,17 +101,19 @@ export class IngestionService {
         [timestamp, uplink.latitude || null, uplink.longitude || null, device.id],
       );
 
-      // 5. Evaluar Reglas de Alertas en Tiempo Real
-      await this.alertsEngine.evaluateUplink(device, uplink);
+      // 5. Evaluar Reglas de Alertas en Tiempo Real sobre humedad suavizada
+      const processedUplink = { ...uplink, humidity: smoothedHumidity };
+      await this.alertsEngine.evaluateUplink(device, processedUplink);
 
-      // 6. Transmitir en Tiempo Real por SSE/WebSockets
+      // 6. Transmitir en Tiempo Real por SSE/WebSockets (incluye N_raw)
       this.realtime.broadcastMeasurement(device.id, device.dev_eui, {
-        humidity: uplink.humidity,
+        humidity: smoothedHumidity,
         temperature: uplink.temperature,
         pressure: uplink.pressure,
         battery: uplink.battery,
         rssi: uplink.rssi,
         snr: uplink.snr,
+        neutron_counts: uplink.neutron_counts,
         timestamp,
         status: 'online',
       });

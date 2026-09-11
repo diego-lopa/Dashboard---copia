@@ -225,6 +225,8 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: 'En alerta',
         dev_critical: 'Crítico',
         dev_offline: 'Sin conexión',
+        neutron_label: 'Neutrones (N_raw)',
+        d86_label: 'Profundidad D86',
     },
     en: {
         system_name: 'CORNEA',
@@ -439,6 +441,8 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: 'Warning',
         dev_critical: 'Critical',
         dev_offline: 'Offline',
+        neutron_label: 'Neutrons (N_raw)',
+        d86_label: 'D86 Depth',
     },
     gl: {
         system_name: 'CORNEA',
@@ -645,6 +649,8 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: 'En alerta',
         dev_critical: 'Crítico',
         dev_offline: 'Sen conexión',
+        neutron_label: 'Neutróns (N_raw)',
+        d86_label: 'Profundidade D86',
     },
     zh: {
         system_name: 'CORNEA',
@@ -851,6 +857,8 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: '告警',
         dev_critical: '严重',
         dev_offline: '离线',
+        neutron_label: '中子计数 (N_raw)',
+        d86_label: 'D86 有效深度',
     },
     hi: {
         system_name: 'CORNEA',
@@ -1053,6 +1061,8 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: 'चेतावनी',
         dev_critical: 'गंभीर',
         dev_offline: 'ऑफ़लाइन',
+        neutron_label: 'न्यूट्रॉन (N_raw)',
+        d86_label: 'D86 गहराई',
     },
     fr: {
         system_name: 'CORNEA',
@@ -1255,6 +1265,8 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: 'En alerte',
         dev_critical: 'Critique',
         dev_offline: 'Hors ligne',
+        neutron_label: 'Neutrons (N_raw)',
+        d86_label: 'Profondeur D86',
     },
     ar: {
         system_name: 'CORNEA',
@@ -1457,6 +1469,8 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: 'تحذير',
         dev_critical: 'حرج',
         dev_offline: 'غير متصل',
+        neutron_label: 'نيوترونات (N_raw)',
+        d86_label: 'العمق D86',
     },
     pt: {
         system_name: 'CORNEA',
@@ -1659,6 +1673,8 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: 'Em alerta',
         dev_critical: 'Crítico',
         dev_offline: 'Offline',
+        neutron_label: 'Neutrões (N_raw)',
+        d86_label: 'Profundidade D86',
     },
     de: {
         system_name: 'CORNEA',
@@ -1861,6 +1877,8 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: 'Warnung',
         dev_critical: 'Kritisch',
         dev_offline: 'Offline',
+        neutron_label: 'Neutronen (N_raw)',
+        d86_label: 'D86-Tiefe',
     },
     ru: {
         system_name: 'CORNEA',
@@ -2063,6 +2081,8 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: 'Предупреждение',
         dev_critical: 'Критический',
         dev_offline: 'Не в сети',
+        neutron_label: 'Нейтроны (N_raw)',
+        d86_label: 'Глубина D86',
     },
     it: {
         system_name: 'CORNEA',
@@ -2265,5 +2285,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         dev_warning: 'Avviso',
         dev_critical: 'Critico',
         dev_offline: 'Offline',
+        neutron_label: 'Neutroni (N_raw)',
+        d86_label: 'Profondità D86',
     },
 };
