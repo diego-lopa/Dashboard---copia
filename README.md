@@ -29,6 +29,7 @@ Desarrollado por **Neutron Insights**. Licencia MIT.
 12. [Variables de entorno](#12-variables-de-entorno)
 13. [Solución de problemas](#13-solución-de-problemas)
 14. [Notas conocidas](#14-notas-conocidas)
+15. [Operativa diaria Docker (PowerShell)](#15-operativa-diaria-docker-powershell)
 
 ---
 
@@ -611,6 +612,44 @@ Copiar `cp .env.example .env` y ajustar. Las más relevantes:
   una corrección sistémica habría que unificar la semántica a % en
   `devices.service.ts` + `alerts-engine.service.ts` y reconstruir la imagen.
 - **Logo**: colocar `logo.png` (703×703, transparente) en `frontend/public/`.
+
+---
+
+## 15. Operativa diaria Docker (PowerShell)
+
+Servicios: `postgres redis mosquitto chirpstack chirpstack-gateway-bridge
+backend-api backend-worker frontend simulator` (contenedores `cornea_*`).
+
+```powershell
+docker compose ps                                  # estado de todo el stack
+docker compose logs -f backend-api                 # logs en vivo (Ctrl+C para salir)
+docker compose logs --tail 50 simulator            # últimas 50 líneas
+
+# Reiniciar SIN eliminar nada (proceso, config, volúmenes y datos intactos)
+docker compose restart backend-api                 # un servicio
+docker compose restart                             # todo el stack
+
+# Parar y arrancar (conserva contenedores y datos, libera CPU/RAM)
+docker compose stop                                # parar todo
+docker compose stop simulator                      # parar uno
+docker compose start                               # arrancar lo parado
+
+# Aplicar cambios de código o de compose/.env (reconstruye y recrea)
+docker compose up -d --build backend-api backend-worker
+docker compose up -d                                # levanta lo parado con la config actual
+
+# Entrar a un contenedor / usar recursos
+docker compose exec backend-api sh
+docker stats                                       # CPU/RAM por contenedor (Ctrl+C para salir)
+```
+
+| Comando | ¿Elimina algo? | ¿Pierdo datos? |
+|---|---|---|
+| `restart [servicio]` | No | No |
+| `stop` / `start` | No | No |
+| `up -d [--build]` | Recrea contenedores | No (volúmenes intactos) |
+| `down` | Contenedores y red | No (volúmenes intactos) |
+| `down -v` | Todo **incluidos volúmenes** | **Sí: BD borrada** → reejecutar seed |
 
 ---
 
