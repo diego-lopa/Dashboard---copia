@@ -419,7 +419,10 @@ El KPI «Batería Baja» usa `isLowBattery()`: umbrales **> 15 se leen como %**
   con **humedad %, temperatura y neutrones**
   (`frontend/src/components/charts/TelemetryChart.tsx`, leyenda con scroll
   inferior y ejes cortos `% / °C` y `N` para responsive). Rangos: **8h / 24h /
-  30d / registro completo**, con carga bajo demanda al seleccionarlos.
+  30d / registro completo**, con carga bajo demanda al seleccionarlos. El eje
+  temporal es real (`type: time`): cada registro es un punto posicionado por
+  su instante (equiespaciados a 30 min; pausas y desconexiones se ven como
+  huecos, sin unir con línea) y el zoom de rueda/slider separa los puntos.
 - **CSV**: `GET /api/v1/devices/:id/export/csv` (botón en la ficha).
 - **Mapa**: `frontend/src/components/map/SensorMap.tsx` (react-leaflet +
   OpenStreetMap en ambos temas, zoom con rueda, popup por sonda).

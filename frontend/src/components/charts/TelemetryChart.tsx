@@ -16,7 +16,6 @@ interface TelemetryChartProps {
 
 export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   data,
-  interval,
   humidityMin = 15,
   humidityMax = 85,
   title,
@@ -31,19 +30,21 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   const temperatureLabel = `${t('temperature')} (°C)`;
   const neutronLabel = t('neutron_label');
 
-  const timestamps = data.map((d) => {
+  // Pares [instante_ms, valor]: el eje temporal posiciona cada registro
+  // según su instante real (equiespaciado a 30 min; los huecos por pausas
+  // o desconexiones quedan visibles como tramos vacíos).
+  const toPoint = (d: TelemetryPoint, v?: number | null): [number, number | null] | null => {
     const rawTime = d.bucket || d.time || '';
-    if (!rawTime) return '';
-    try {
-      return format(new Date(rawTime), interval === 'raw' || interval === '1m' || interval === '5m' ? 'HH:mm:ss' : 'dd/MM HH:mm');
-    } catch {
-      return rawTime;
-    }
-  });
+    if (!rawTime) return null;
+    const ms = new Date(rawTime).getTime();
+    if (Number.isNaN(ms)) return null;
+    return [ms, v ?? null];
+  };
+  const isValidPoint = (p: [number, number | null] | null): p is [number, number | null] => p !== null;
 
-  const humidities = data.map((d) => d.avg_humidity ?? d.humidity ?? null);
-  const temperatures = data.map((d) => d.avg_temperature ?? d.temperature ?? null);
-  const neutrons = data.map((d) => d.avg_neutron_counts ?? d.neutron_counts ?? null);
+  const humidities = data.map((d) => toPoint(d, d.avg_humidity ?? d.humidity)).filter(isValidPoint);
+  const temperatures = data.map((d) => toPoint(d, d.avg_temperature ?? d.temperature)).filter(isValidPoint);
+  const neutrons = data.map((d) => toPoint(d, d.avg_neutron_counts ?? d.neutron_counts)).filter(isValidPoint);
 
   const option = {
     backgroundColor: 'transparent',
@@ -63,6 +64,20 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
       axisPointer: {
         type: 'cross',
         crossStyle: { color: '#64748B' },
+      },
+      formatter: (params: any) => {
+        const arr = Array.isArray(params) ? params : [params];
+        if (!arr.length) return '';
+        let timeLabel = '';
+        try {
+          timeLabel = format(new Date(arr[0].value[0]), 'dd/MM/yyyy HH:mm');
+        } catch {
+          timeLabel = '';
+        }
+        const lines = arr.map(
+          (p: any) => `${p.marker || ''} ${p.seriesName}: <b>${p.value?.[1] ?? '--'}</b>`,
+        );
+        return `${timeLabel}<br/>${lines.join('<br/>')}`;
       },
     },
     legend: {
@@ -103,11 +118,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
       },
     ],
     xAxis: {
-      type: 'category',
-      data: timestamps,
-      boundaryGap: false,
+      type: 'time',
       axisLine: { lineStyle: { color: isDark ? '#334155' : '#CBD5E1' } },
-      axisLabel: { color: isDark ? '#94A3B8' : '#334155', fontSize: 11 },
+      axisLabel: { color: isDark ? '#94A3B8' : '#334155', fontSize: 11, hideOverlap: true },
       splitLine: { show: false },
     },
     yAxis: [
@@ -137,8 +150,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
         name: humidityLabel,
         type: 'line',
         smooth: true,
-        showSymbol: data.length < 50,
+        showSymbol: true,
         symbolSize: 6,
+        connectNulls: false,
         data: humidities,
         itemStyle: { color: '#10B981' },
         lineStyle: { width: 3, color: '#10B981' },
@@ -176,7 +190,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
         name: temperatureLabel,
         type: 'line',
         smooth: true,
-        showSymbol: data.length < 50,
+        showSymbol: true,
+        symbolSize: 5,
+        connectNulls: false,
         data: temperatures,
         itemStyle: { color: '#F59E0B' },
         lineStyle: { width: 2, color: '#F59E0B' },
@@ -186,7 +202,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
         type: 'line',
         yAxisIndex: 1,
         smooth: true,
-        showSymbol: false,
+        showSymbol: true,
+        symbolSize: 5,
+        connectNulls: false,
         data: neutrons,
         itemStyle: { color: '#818CF8' },
         lineStyle: { width: 2, color: '#818CF8' },
