@@ -413,7 +413,8 @@ Bytes: `[0x02, 0xAC, 0x00, 0xE7, 0x0F, 0x08]`
 | `--count` | `SENSOR_COUNT` | Integer | `5` | Número de sensores a simular |
 | `--interval` | `INTERVAL_MS` | Integer | `1800000` (30 min) | Intervalo en ms entre envíos (acelerar tiempo con valores bajos) |
 | `--anomalies` | `INJECT_ANOMALIES` | Flag | `false` | Activar inyección de anomalías |
-| `--neutrons` | `NEUTRON_MODE` | Flag | `false` | Enviar `neutron_counts` para que el backend calcule θ |
+| `--neutrons` | `NEUTRON_MODE` | Flag | `true` | Enviar `neutron_counts` para que el backend calcule θ (siempre coherente) |
+| `--no-neutrons` | `NEUTRON_MODE=false` | Flag | — | Solo humedad directa (modo legacy) |
 | `--backfill` | `SIM_BACKFILL` | Integer | `10` | Muestras históricas por sensor al conectar (cada intervalo, sin anomalías, idempotente) |
 | `--neutrons` | | Flag | `false` | Modo CRNS: envía `neutron_counts` (N_raw con ruido Poisson) y el backend calcula θ con el modelo Geant4 (`cornea_pipeline/config/calibration_config.json`, N₀=143.0) |
 

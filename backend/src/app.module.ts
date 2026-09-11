@@ -11,6 +11,7 @@ import { RealtimeModule } from './modules/realtime/realtime.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { IngestionModule } from './modules/ingestion/ingestion.module';
+import { SystemModule } from './modules/system/system.module';
 
 @Module({
   imports: [
@@ -28,6 +29,7 @@ import { IngestionModule } from './modules/ingestion/ingestion.module';
     NotificationsModule,
     AlertsModule,
     IngestionModule,
+    SystemModule,
   ],
 })
 export class AppModule {}

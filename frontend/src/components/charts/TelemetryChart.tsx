@@ -11,6 +11,7 @@ interface TelemetryChartProps {
   humidityMin?: number;
   humidityMax?: number;
   title?: string;
+  subtitle?: string;
 }
 
 export const TelemetryChart: React.FC<TelemetryChartProps> = ({
@@ -19,6 +20,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   humidityMin = 15,
   humidityMax = 85,
   title,
+  subtitle,
 }) => {
   const { theme } = useTheme();
   const { t } = useLanguage();
@@ -47,8 +49,11 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
     backgroundColor: 'transparent',
     title: {
       text: chartTitle,
-      textStyle: { color: isDark ? '#F8FAFC' : '#0F172A', fontSize: 14, fontWeight: '600' },
+      subtext: subtitle || '',
+      textStyle: { color: isDark ? '#F8FAFC' : '#0F172A', fontSize: 13, fontWeight: '600', overflow: 'truncate', width: 480 },
+      subtextStyle: { color: isDark ? '#94A3B8' : '#64748B', fontSize: 11 },
       left: '0',
+      top: '0',
     },
     tooltip: {
       trigger: 'axis',
@@ -61,16 +66,21 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
       },
     },
     legend: {
+      type: 'scroll',
+      orient: 'horizontal',
       data: [humidityLabel, temperatureLabel, neutronLabel],
-      textStyle: { color: isDark ? '#94A3B8' : '#334155' },
-      top: '0',
-      right: '0',
+      textStyle: { color: isDark ? '#94A3B8' : '#334155', fontSize: 11 },
+      pageTextStyle: { color: isDark ? '#94A3B8' : '#334155' },
+      pageIconColor: '#10B981',
+      pageIconInactiveColor: isDark ? '#475569' : '#CBD5E1',
+      left: 'center',
+      bottom: '9%',
     },
     grid: {
       left: '3%',
       right: '4%',
-      bottom: '12%',
-      top: '18%',
+      bottom: '24%',
+      top: '16%',
       containLabel: true,
     },
     dataZoom: [
@@ -103,7 +113,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
     yAxis: [
       {
         type: 'value',
-        name: `${t('soil_moisture')} / ${t('temperature')}`,
+        name: '% / °C',
         nameTextStyle: { color: isDark ? '#94A3B8' : '#334155', fontSize: 11 },
         position: 'left',
         axisLine: { lineStyle: { color: isDark ? '#334155' : '#CBD5E1' } },

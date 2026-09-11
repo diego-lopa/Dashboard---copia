@@ -20,7 +20,9 @@ export class TelemetryService {
     const toDate = query.to || new Date().toISOString();
     const interval = query.interval || 'raw';
 
-    // 2. Si se solicita datos raw (sin agregación)
+    // 2. Si se solicita datos raw (sin agregación): los 5000 MÁS RECIENTES
+    // del rango (DESC + inversión), para que "registro completo" muestre
+    // datos útiles en vez de los 5000 más antiguos.
     if (interval === 'raw') {
       const sql = `
         SELECT
@@ -38,16 +40,17 @@ export class TelemetryService {
           neutron_counts
         FROM measurements
         WHERE device_id = $1 AND time >= $2 AND time <= $3 AND valid = true
-        ORDER BY time ASC
+        ORDER BY time DESC
         LIMIT 5000;
       `;
       const res = await this.db.query(sql, [deviceId, fromDate, toDate]);
+      const rowsAsc = [...res.rows].reverse();
       return {
         deviceId,
         device: devCheck.rows[0],
         interval: 'raw',
-        count: res.rows.length,
-        data: res.rows,
+        count: rowsAsc.length,
+        data: rowsAsc,
       };
     }
 

@@ -291,6 +291,14 @@ npm run simulate:fast    # 5 sensores cada 5 s con anomalías → verás datos e
      `θ_suav = 0.3·θ_inst + 0.7·θ_prev` (α = 0.3) contra el ruido de Poisson;
      se persiste la humedad **suavizada**, las alertas se evalúan sobre ella y
      el SSE difunde `neutron_counts` junto a la telemetría.
+   - **Coherencia total**: si el uplink trae humedad sin neutrones, el codec
+     estima N con la inversa (`estimateNeutronsFromHumidity()`); ningún
+     registro nuevo queda con campos vacíos.
+   - **Ingesta única y a prueba de duplicados**: solo el worker se suscribe a
+     MQTT (`MQTT_SUBSCRIBE=false` en la API); el INSERT lleva
+     `ON CONFLICT DO NOTHING` sobre `(device_id, time)`.
+   - **Salud MQTT**: `GET /api/v1/system/mqtt-status` (solo admin, módulo
+     `system/`) comprueba el broker por TCP desde el backend.
    - `backend/src/modules/ingestion/ingestion.service.ts`:
      - `processRawMessage()` → `ingestNormalizedUplink()` produce un
        `NormalizedUplink` (`shared/types`),
@@ -369,6 +377,8 @@ measurements(time, device_id, humidity, temperature, pressure, battery,
 >   (el INSERT de ingesta lleva `ON CONFLICT DO NOTHING`).
 > - `004`: elimina tenants duplicados huérfanos y fija `UNIQUE(name)` para
 >   que el seed no los multiplique.
+> - `005`: estima N en filas históricas con humedad pero sin neutrones
+>   (inversa Geant4), para coherencia total de registros antiguos.
 
 Tablas de apoyo: `tenants`, `users`, `devices` (umbrales
 `humidity_min/max_threshold`, `battery_threshold`, `last_seen_at`),
@@ -404,21 +414,24 @@ El KPI «Batería Baja» usa `isLowBattery()`: umbrales **> 15 se leen como %**
   `frontend/src/hooks/useRealtime.ts` reconecta cada 4 s y alimenta el
   indicador «Tiempo Real Activo» del Navbar.
 - **Histórico**: `GET /api/v1/devices/:id/measurements?from&to&interval`
-  (agregación `raw|1m|5m|15m|1h|1d`) → gráfico ECharts con **humedad %,
-  temperatura y neutrones** (`frontend/src/components/charts/TelemetryChart.tsx`,
-  leyenda traducida). Rangos: **8h / 24h / 30d / registro completo** (carga bajo
-  demanda; `completo` fuerza agregación diaria y deshabilita `raw`).
+  (siempre `raw` desde la UI: con cadencia de 30 min, 30 días son 1440 puntos;
+  el backend devuelve como máximo los 5000 más recientes) → gráfico ECharts
+  con **humedad %, temperatura y neutrones**
+  (`frontend/src/components/charts/TelemetryChart.tsx`, leyenda con scroll
+  inferior y ejes cortos `% / °C` y `N` para responsive). Rangos: **8h / 24h /
+  30d / registro completo**, con carga bajo demanda al seleccionarlos.
 - **CSV**: `GET /api/v1/devices/:id/export/csv` (botón en la ficha).
 - **Mapa**: `frontend/src/components/map/SensorMap.tsx` (react-leaflet +
   OpenStreetMap en ambos temas, zoom con rueda, popup por sonda).
 - **Física CRNS en la ficha** (`frontend/src/pages/DeviceDetail.tsx`):
   tarjeta **N_raw (cuantos)** con el último recuento (vía REST
-  `latest_neutron_counts` —último N no nulo— o SSE en vivo) y tarjeta **D86**
-  con la profundidad efectiva `D₈₆ = 12.4 / (0.3 + θ/100)` cm calculada de la
-  humedad suavizada. La tabla de histórico muestra Fecha/Hora, Humedad,
-  **Neutrones**, Temperatura, Batería, Presión, RSSI y Muestras. El histórico
-  expone `neutron_counts` (raw) y `avg_neutron_counts` (buckets) y el CSV
-  incluye ambas columnas.
+  `latest_neutron_counts` —último N no nulo— o SSE en vivo). La tabla de
+  histórico muestra Fecha/Hora, Humedad, **Neutrones**, Temperatura, Batería,
+  Presión, RSSI y Muestras. El histórico expone `neutron_counts` (raw) y
+  `avg_neutron_counts` (buckets) y el CSV incluye ambas columnas.
+  Coherencia total: si un uplink trae humedad sin neutrones, el backend
+  estima N con la inversa del modelo (misma fórmula); si trae neutrones,
+  calcula θ. Ningún registro nuevo queda con campos vacíos.
 
 ---
 
@@ -486,19 +499,24 @@ y anomalías programadas para probar la histéresis. Detalle completo en
 npm --prefix simulator install
 npm --prefix simulator run simulate:fast      # 5 sondas cada 5 s + anomalías (ideal para demo)
 npm --prefix simulator run simulate:anomalies
-npm --prefix simulator run simulate:neutrons  # modo CRNS: envía N_raw y el backend calcula θ
+npm --prefix simulator run simulate:neutrons  # modo CRNS explícito (ahora es el defecto)
 npm --prefix simulator run load-test          # 100 sondas cada 2 s (carga)
 ```
 
-> Con Docker no hace falta arrancarlo a mano: el servicio `simulator` del
-> compose (modo neutrónico + anomalías cada 30 min, como las sondas físicas)
-> envía al conectar un **backfill de 10 muestras históricas** por sonda y la
-> primera ráfaga en vivo, así que gráfica y tarjeta N_raw se rellenan solas
-> al levantar el stack. `SIM_INTERVAL_MS` lo acelera y `SIM_BACKFILL`
-> ajusta el histórico inicial (idempotente gracias a la unicidad).
+```bash
 # Ejemplo avanzado (ejecutar dentro de simulator/):
-# node mock-lora-devices.js --count 20 --interval 10000 --url mqtt://<broker>:1883 --user iot --pass changeme
+node mock-lora-devices.js --count 20 --interval 10000 --url mqtt://<broker>:1883 --user iot --pass changeme
 ```
+
+> Desde la v2 el simulador envía **neutrones por defecto** (opt-out con
+> `--no-neutrons` o `NEUTRON_MODE=false`); si un uplink trae humedad sin N,
+> el backend estima N con la inversa Geant4. Con Docker no hace falta
+> arrancarlo a mano: el servicio `simulator` del compose (modo neutrónico +
+> anomalías cada 30 min, como las sondas físicas) envía al conectar un
+> **backfill de 10 muestras históricas** por sonda y la primera ráfaga en
+> vivo, así que gráfica y tarjeta N_raw se rellenan solas al levantar el
+> stack. `SIM_INTERVAL_MS` lo acelera y `SIM_BACKFILL` ajusta el histórico
+> inicial (idempotente gracias a la unicidad).
 
 > `npm --prefix <carpeta>` funciona igual en PowerShell, cmd y bash, sin
 > necesidad de `cd` ni de `&&` (no soportado en PowerShell 5.1).
@@ -522,8 +540,10 @@ curl -X POST http://localhost:8000/api/v1/ingest/gateway \
 
 El mismo envío puede hacerse desde **Administración → Probador de Ingesta**
 (formato ChirpStack v4 o JSON simple, con generador de cURL). El campo
-opcional **N_raw (n/s)** hace que el backend calcule θ con el modelo Geant4
-en lugar de usar la humedad del formulario (válido para cualquier sonda).
+opcional **N_raw (cuantos)** hace que el backend calcule θ con el modelo
+Geant4 en lugar de usar la humedad del formulario (válido para cualquier
+sonda). Nuevo endpoint de sistema: `GET /api/v1/system/mqtt-status`
+(solo admin) → `{online, latencyMs, host}`.
 
 ---
 
@@ -532,8 +552,9 @@ en lugar de usar la humedad del formulario (válido para cualquier sonda).
 Ruta `/admin` (solo rol `admin`), `frontend/src/pages/AdminView.tsx`, en este orden:
 
 1. **Estado de Servicios & Topología Backend** — checks en vivo con latencia:
-   API (`/health`), TimescaleDB (query vía `/devices`) y Mosquitto (sonda
-   WebSocket a `:9001`), con botón de re-chequeo.
+   API (`/health`), TimescaleDB (query vía `/devices`) y Mosquitto (vía
+   `GET /api/v1/system/mqtt-status`, comprobación TCP desde el backend —
+   fiable desde cualquier navegador), con botón de re-chequeo.
 2. **Usuarios con Acceso** — tabla + **crear** (email, contraseña ≥ 6, rol,
    estado), **editar** (rol/estado/contraseña opcional) y **eliminar** (la
    cuenta propia está protegida).
@@ -568,7 +589,7 @@ Copiar `cp .env.example .env` y ajustar. Las más relevantes:
 | Pantalla en negro al llegar una alerta | (Corregido) El SSE enviaba claves `camelCase` y el formateo de fechas lanzaba sin red de seguridad | `utils/realtime.ts` normaliza el evento, `utils/dates.ts` nunca lanza y `components/ErrorBoundary.tsx` muestra panel de recuperación |
 | `Port 3000 is in use` en `npm run dev` | Otro proceso/contenedor ocupa el 3000 | `netstat -ano \| findstr :3000` y libera, o usa el puerto alternativo que propone Vite |
 | Página en blanco tras `npm run dev` | Faltaba el plugin React / módulos vacíos (ya corregido) | `npm install` + recargar; revisa la consola del navegador |
-| Tarjeta N_raw en `--` pero D86 sí se muestra | No hay tráfico neutrónico: el simulador va en modo humedad y/o la BD solo tiene histórico sin `neutron_counts` (D86 deriva de θ, por eso sí aparece) | Arrancar `npm --prefix simulator run simulate:neutrons` o enviar `neutron_counts` desde el probador de ingesta. Con Docker, el servicio `simulator` ya lo hace solo |
+| Tarjeta N_raw en `--` | No hay tráfico neutrónico reciente y tampoco histórico con N | El servicio `simulator` de Docker ya envía neutrones solo; en manual usar `simulate:neutrons`. Desde la v2 el simulador trae neutrones por defecto y el backend estima N si falta, así que todo registro nuevo es completo |
 | Dos simuladores a la vez mezclan tráficos | Un simulador en host (humedad) + el servicio `simulator` (neutrones) compiten: el `latest` salta de uno a otro y el EMA mezcla ambos | Quedarse con uno solo: detener el de host (Ctrl+C) o pasarlo a `--neutrons`. `latest_neutron_counts` devuelve el último N no nulo aunque el tráfico sea mixto |
 | Login 401 / redirección a `/login` | Token caducado o backend caído | Comprueba `docker compose ps` y `:8000/health` |
 | Sin datos en tiempo real | Mosquitto caído o SSE bloqueado | Admin → Estado de servicios; `docker compose logs mosquitto backend-worker` |

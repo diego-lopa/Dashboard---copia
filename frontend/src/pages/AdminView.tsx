@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import apiClient from '../api/client';
 import { Device } from '../types';
 import { useAuth } from '../hooks/useAuth';
@@ -84,8 +84,7 @@ export const AdminView: React.FC = () => {
   const [dbLatency, setDbLatency] = useState<number | null>(null);
   const [mqttStatus, setMqttStatus] = useState<SvcState>('checking');
   const [mqttLatency, setMqttLatency] = useState<number | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
-  const mqttTimer = useRef<number | null>(null);
+  const [mqttHost, setMqttHost] = useState<string | null>(null);
 
   // ── Tester de ingesta ─────────────────────────────────────
   const [devices, setDevices] = useState<Device[]>([]);
@@ -313,41 +312,22 @@ export const AdminView: React.FC = () => {
     }
   };
 
-  const checkMqtt = () => {
+  // El estado MQTT se comprueba en el backend (TCP directo al broker en la
+  // red Docker): fiable desde cualquier navegador, sin depender de
+  // WebSockets salientes que cortafuegos o el navegador pueden bloquear.
+  const checkMqtt = async () => {
     setMqttStatus('checking');
     setMqttLatency(null);
+    const t0 = performance.now();
     try {
-      if (mqttTimer.current) window.clearTimeout(mqttTimer.current);
-      try {
-        wsRef.current?.close();
-      } catch {
-        /* noop */
-      }
-      const t0 = performance.now();
-      const ws = new WebSocket(`ws://${window.location.hostname}:9001`);
-      wsRef.current = ws;
-      mqttTimer.current = window.setTimeout(() => {
-        try {
-          ws.close();
-        } catch {
-          /* noop */
-        }
-        setMqttStatus((s) => (s === 'checking' ? 'offline' : s));
-      }, 6000);
-      ws.onopen = () => {
-        setMqttLatency(Math.round(performance.now() - t0));
+      const res = await apiClient.get('/system/mqtt-status');
+      if (res.data?.online) {
+        setMqttLatency(res.data.latencyMs ?? Math.round(performance.now() - t0));
+        setMqttHost(res.data.host || null);
         setMqttStatus('online');
-        if (mqttTimer.current) window.clearTimeout(mqttTimer.current);
-        try {
-          ws.close();
-        } catch {
-          /* noop */
-        }
-      };
-      ws.onerror = () => {
-        if (mqttTimer.current) window.clearTimeout(mqttTimer.current);
+      } else {
         setMqttStatus('offline');
-      };
+      }
     } catch {
       setMqttStatus('offline');
     }
@@ -362,14 +342,6 @@ export const AdminView: React.FC = () => {
   useEffect(() => {
     loadUsers();
     checkServices();
-    return () => {
-      if (mqttTimer.current) window.clearTimeout(mqttTimer.current);
-      try {
-        wsRef.current?.close();
-      } catch {
-        /* noop */
-      }
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -481,7 +453,7 @@ export const AdminView: React.FC = () => {
             icon={<Radio className="w-4 h-4 text-amber-500 shrink-0" />}
             name={t('mqtt_status')}
             state={mqttStatus}
-            detail={`ws://${window.location.hostname}:9001`}
+            detail={mqttHost || t('mqtt_status')}
             latency={mqttLatency}
           />
         </div>

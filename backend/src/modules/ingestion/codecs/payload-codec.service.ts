@@ -88,6 +88,32 @@ export class PayloadCodecService {
   }
 
   /**
+   * Estima N_raw a partir de una humedad conocida (inversa del modelo).
+   * Se usa cuando el uplink trae humedad pero no neutrones, para que todos
+   * los registros tengan todos los tipos de datos (coherencia de gráficas).
+   * Es una estimación (no medida): N = ratio·N0/fp con
+   * ratio = -ln((θ-a2)/a0)/a1.
+   */
+  public estimateNeutronsFromHumidity(humidity: number, pressureHpa: number = 981.4): number {
+    const cfg = this.getCalibrationConfig();
+    const N0 = cfg.N0_suelo_seco ?? 143.0;
+    const params = cfg.parametros ?? {};
+    const P0 = cfg.presion_referencia_P0 ?? 981.4;
+    const L = cfg.longitud_atenuacion_L ?? 137.0;
+    const a0 = params.a0 ?? 107.38107297640175;
+    const a1 = params.a1 ?? 3.0361746292354415;
+    const a2 = params.a2 ?? -4.894223415942227;
+
+    const t = Math.min(99, Math.max(0.5, humidity));
+    const x = (t - a2) / a0;
+    if (x <= 0 || a1 === 0) return Math.round(N0);
+    const ratio = -Math.log(x) / a1;
+    const fp = Math.exp((P0 - pressureHpa) / L);
+    if (fp <= 0) return Math.round(N0);
+    return Math.max(1, Math.round(((ratio * N0) / fp) * 10) / 10);
+  }
+
+  /**
    * Decodifica y normaliza un mensaje proveniente de ChirpStack o Ingesta HTTP directa
    */
   decode(rawMessage: any): NormalizedUplink | null {
@@ -141,6 +167,10 @@ export class PayloadCodecService {
         humidity = this.calculateMoistureFromNeutrons(rawNeutrons, pressure ?? 981.4);
       } else {
         humidity = this.parseNumber(msg.object.humidity ?? msg.object.soil_moisture ?? msg.object.hum);
+        // Sin neutrones pero con humedad: estimar N para coherencia total
+        if (humidity !== undefined) {
+          rawNeutrons = this.estimateNeutronsFromHumidity(humidity, pressure ?? 981.4);
+        }
       }
     }
 
@@ -180,13 +210,17 @@ export class PayloadCodecService {
     let latitude = this.parseNumber(msg.latitude ?? msg.lat);
     let longitude = this.parseNumber(msg.longitude ?? msg.lon ?? msg.lng);
 
-    // Si vienen neutrones CRNS, la humedad se calcula con el modelo Geant4
-    const rawNeutrons = this.parseNumber(msg.neutron_counts ?? msg.neutrons ?? msg.n_raw ?? msg.neutron_count);
+    // Si vienen neutrones CRNS, la humedad se calcula con el modelo Geant4.
+    // Si solo viene humedad, se estima N para coherencia total de registros.
+    let rawNeutrons = this.parseNumber(msg.neutron_counts ?? msg.neutrons ?? msg.n_raw ?? msg.neutron_count);
     let humidity: number | undefined;
     if (rawNeutrons !== undefined) {
       humidity = this.calculateMoistureFromNeutrons(rawNeutrons, pressure ?? 981.4);
     } else {
       humidity = this.parseNumber(msg.humidity ?? msg.soil_moisture ?? msg.hum);
+      if (humidity !== undefined) {
+        rawNeutrons = this.estimateNeutronsFromHumidity(humidity, pressure ?? 981.4);
+      }
     }
 
     // Si viene rawPayload en base64

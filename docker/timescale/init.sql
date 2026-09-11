@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS measurements (
     raw_payload TEXT,
     valid BOOLEAN NOT NULL DEFAULT true,
     neutron_counts DOUBLE PRECISION,
+    CONSTRAINT uq_measurements_device_time UNIQUE (device_id, time),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

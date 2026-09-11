@@ -194,8 +194,19 @@ async function seed() {
     }
     console.log('✅ Reglas de alerta configuradas (rango 15–85 %)');
 
-    // 5. Generar Histórico de Mediciones de Ejemplo (Últimas 48 horas)
+    // 5. Generar Histórico de Mediciones de Ejemplo (Últimas 48 horas).
+    // Incluye N_raw estimado desde la humedad (inversa Geant4) para que todos
+    // los registros históricos tengan todos los tipos de datos.
     console.log('⏳ Generando histórico de 48 horas de telemetría para demostración...');
+    const CAL = { N0: 143.0, a0: 107.38107297640175, a1: 3.0361746292354415, a2: -4.894223415942227, P0: 981.4, L: 137.0 };
+    const estimateN = (h: number, p: number) => {
+      const t = Math.min(99, Math.max(0.5, h));
+      const x = (t - CAL.a2) / CAL.a0;
+      if (x <= 0) return Math.round(CAL.N0);
+      const fp = Math.exp((CAL.P0 - p) / CAL.L);
+      if (!(fp > 0)) return Math.round(CAL.N0);
+      return Math.max(1, Math.round(((-Math.log(x) / CAL.a1) * CAL.N0) / fp * 10) / 10);
+    };
     const now = Date.now();
     const fortyEightHoursAgo = now - 48 * 60 * 60 * 1000;
     const intervalMinutes = 15;
@@ -223,9 +234,9 @@ async function seed() {
 
         await client.query(`
           INSERT INTO measurements (
-            time, device_id, humidity, temperature, pressure, battery, rssi, snr, gateway_id, fcnt_up, valid
+            time, device_id, humidity, temperature, pressure, battery, rssi, snr, gateway_id, fcnt_up, valid, neutron_counts
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, 'GATEWAY_GW01_MADRID', $9, true
+            $1, $2, $3, $4, $5, $6, $7, $8, 'GATEWAY_GW01_MADRID', $9, true, $10
           ) ON CONFLICT DO NOTHING;
         `, [
           timePoint.toISOString(),
@@ -237,6 +248,7 @@ async function seed() {
           rssi,
           snr,
           step + 1,
+          estimateN(humidity, pressure),
         ]);
       }
     }

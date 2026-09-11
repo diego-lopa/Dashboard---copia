@@ -36,8 +36,12 @@ const INJECT_ANOMALIES =
 // (timestamps en frontera de intervalo + ON CONFLICT en ingesta, migración 003).
 const BACKFILL_RAW = parseInt(process.env.SIM_BACKFILL || getArg('--backfill', '10'), 10);
 const BACKFILL = Number.isNaN(BACKFILL_RAW) ? 10 : Math.max(0, BACKFILL_RAW);
-// Modo neutrónico CRNS: envía neutron_counts y el backend calcula θ con Geant4
-const NEUTRON_MODE = args.includes('--neutrons') || process.env.NEUTRON_MODE === 'true';
+// Modo neutrónico CRNS (ACTIVO por defecto): envía neutron_counts y el
+// backend calcula θ con Geant4, para que todos los registros tengan todos
+// los tipos de datos. Desactivar con --no-neutrons o NEUTRON_MODE=false.
+const NEUTRON_MODE = args.includes('--no-neutrons')
+  ? false
+  : args.includes('--neutrons') || process.env.NEUTRON_MODE !== 'false';
 
 // Calibración maestra (cornea_pipeline/config/calibration_config.json)
 const CAL = { N0: 143.0, a0: 107.38107297640175, a1: 3.0361746292354415, a2: -4.894223415942227 };
