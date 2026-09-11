@@ -14,6 +14,10 @@ export class MqttSubscriberService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
+    if (this.configService.get<boolean>('mqtt.subscribe') === false) {
+      this.logger.log('Suscripción MQTT desactivada en este proceso (MQTT_SUBSCRIBE=false). Solo el worker ingiere.');
+      return;
+    }
     this.connectMqtt();
   }
 

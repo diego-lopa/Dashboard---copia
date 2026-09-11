@@ -12,6 +12,7 @@ import {
   Languages,
   ChevronDown,
   AlertTriangle,
+  Menu,
 } from 'lucide-react';
 import { Logo } from './Logo';
 
@@ -19,12 +20,14 @@ interface NavbarProps {
   realtimeConnected: boolean;
   activeAlertCount: number;
   onAlertIconClick: () => void;
+  onMenuClick: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   realtimeConnected,
   activeAlertCount,
   onAlertIconClick,
+  onMenuClick,
 }) => {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
@@ -54,14 +57,27 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   return (
     <header
-      className={`h-16 sticky top-0 z-40 px-4 sm:px-6 flex items-center justify-between border-b transition-all duration-300 ${
+      className={`h-16 sticky top-0 z-40 px-3 sm:px-6 flex items-center justify-between border-b transition-all duration-300 ${
         isDark
           ? 'glass-panel border-white/[0.07]'
           : 'bg-white/90 backdrop-blur border-slate-200 shadow-sm'
       }`}
     >
       {/* ── Brand: CORNEA + Neutron Insights ── */}
-      <div className="flex items-center space-x-3 min-w-0">
+      <div className="flex items-center space-x-2 sm:space-x-3 min-w-0">
+        {/* Hamburger solo en móvil: abre el panel lateral */}
+        <button
+          onClick={onMenuClick}
+          title="Menu"
+          aria-label="Menu"
+          className={`md:hidden p-2 -ml-1 rounded-lg transition shrink-0 ${
+            isDark
+              ? 'hover:bg-white/10 text-slate-300 hover:text-white'
+              : 'hover:bg-slate-100 text-slate-600'
+          }`}
+        >
+          <Menu className="w-5 h-5" />
+        </button>
         {/* Brand logo */}
         <Logo size="sm" />
 

@@ -16,8 +16,8 @@ interface TelemetryChartProps {
 export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   data,
   interval,
-  humidityMin = 30,
-  humidityMax = 80,
+  humidityMin = 15,
+  humidityMax = 85,
   title,
 }) => {
   const { theme } = useTheme();
@@ -114,7 +114,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
       },
       {
         type: 'value',
-        name: 'N (n/s)',
+        name: `N (${t('neutron_unit')})`,
         nameTextStyle: { color: isDark ? '#94A3B8' : '#334155', fontSize: 11 },
         position: 'right',
         axisLine: { lineStyle: { color: isDark ? '#334155' : '#CBD5E1' } },

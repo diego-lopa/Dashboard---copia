@@ -609,8 +609,8 @@ export const AdminView: React.FC = () => {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="sm:col-span-2">
                 <label className={labelCls(isDark)}>{t('dev_eui')}</label>
                 <input
                   type="text"
@@ -647,7 +647,7 @@ export const AdminView: React.FC = () => {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
                 <label className={labelCls(isDark)}>{t('soil_moisture')} (%)</label>
                 <input type="number" step="any" value={humidity} onChange={(e) => setHumidity(e.target.value)} className={inputCls(isDark)} />
@@ -661,7 +661,7 @@ export const AdminView: React.FC = () => {
                 <input type="number" step="any" value={battery} onChange={(e) => setBattery(e.target.value)} className={inputCls(isDark)} />
               </div>
               <div>
-                <label className={labelCls(isDark)}>{t('neutron_label')} (n/s)</label>
+                <label className={labelCls(isDark)}>{t('neutron_label')} ({t('neutron_unit')})</label>
                 <input
                   type="number"
                   step="any"

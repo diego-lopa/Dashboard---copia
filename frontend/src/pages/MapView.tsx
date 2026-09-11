@@ -51,7 +51,7 @@ export const MapView: React.FC = () => {
         </div>
 
         {/* Filters */}
-        <div className="flex items-center space-x-3">
+        <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center space-x-2">
             <Filter className={`w-4 h-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
             <select

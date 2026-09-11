@@ -326,8 +326,14 @@ npm run simulate:fast    # 5 sensores cada 5 s con anomalías → verás datos e
   con `condition` (`> >= < <= == !=`) y `threshold`.
 - Estados: `triggered → acknowledged → resolved`. La resolución exige salir
   de la banda de histéresis (`checkHysteresisResolution()`), evitando flapping.
-- Reglas seed en `backend/src/database/seeds/seed.ts` (humedad >80 / <30,
-  batería baja, RSSI débil).
+- Reglas seed en `backend/src/database/seeds/seed.ts`: humedad fuera de
+  **15–85 %** (`<= 15` critical, `>= 85` warning), batería baja, RSSI débil.
+  El seed es idempotente: normaliza por métrica+condición, elimina duplicadas
+  sin eventos y solo inserta las que falten (antes se duplicaban al reejecutar
+  porque `alert_rules` no tenía restricción única).
+- **Ingesta única**: API y worker comparten `AppModule`, pero solo el worker
+  se suscribe a MQTT (`MQTT_SUBSCRIBE=false` en `backend-api`). Sin esto cada
+  uplink se insertaba dos veces.
 
 ---
 
@@ -341,17 +347,28 @@ Esquema en `docker/timescale/init.sql`. Tabla principal:
 measurements(time, device_id, humidity, temperature, pressure, battery,
              latitude, longitude, rssi, snr, gateway_id, fcnt_up,
              raw_payload, valid,
-             neutron_counts)       -- N_raw del detector CRNS (n/s, NULL si no aplica)
+             neutron_counts,      -- N_raw del detector CRNS (cuantos, NULL si no aplica)
+             CONSTRAINT uq_measurements_device_time UNIQUE (device_id, time))
                                    -- hypertable particionada por time
 ```
 
-> La columna `neutron_counts` la crea `docker/timescale/init.sql` en
-> instalaciones frescas. En BD ya creadas, aplicar la migración idempotente:
+> Migraciones idempotentes en `docker/timescale/migrations/` (aplicar en BD
+> ya creadas, en orden):
 >
 > ```powershell
 > Get-Content docker/timescale/migrations/002_add_neutron_counts.sql -Raw |
 >   docker exec -i cornea_postgres psql -U iot -d iot
+> Get-Content docker/timescale/migrations/003_unique_measurement.sql -Raw |
+>   docker exec -i cornea_postgres psql -U iot -d iot
+> Get-Content docker/timescale/migrations/004_unique_tenant_name.sql -Raw |
+>   docker exec -i cornea_postgres psql -U iot -d iot
 > ```
+>
+> - `002`: añade `neutron_counts`.
+> - `003`: elimina duplicados exactos y crea la unicidad `(device_id, time)`
+>   (el INSERT de ingesta lleva `ON CONFLICT DO NOTHING`).
+> - `004`: elimina tenants duplicados huérfanos y fija `UNIQUE(name)` para
+>   que el seed no los multiplique.
 
 Tablas de apoyo: `tenants`, `users`, `devices` (umbrales
 `humidity_min/max_threshold`, `battery_threshold`, `last_seen_at`),
@@ -387,17 +404,21 @@ El KPI «Batería Baja» usa `isLowBattery()`: umbrales **> 15 se leen como %**
   `frontend/src/hooks/useRealtime.ts` reconecta cada 4 s y alimenta el
   indicador «Tiempo Real Activo» del Navbar.
 - **Histórico**: `GET /api/v1/devices/:id/measurements?from&to&interval`
-  (agregación `raw|1m|5m|15m|1h|1d`) → gráfico ECharts
-  (`frontend/src/components/charts/TelemetryChart.tsx`, leyenda traducida).
+  (agregación `raw|1m|5m|15m|1h|1d`) → gráfico ECharts con **humedad %,
+  temperatura y neutrones** (`frontend/src/components/charts/TelemetryChart.tsx`,
+  leyenda traducida). Rangos: **8h / 24h / 30d / registro completo** (carga bajo
+  demanda; `completo` fuerza agregación diaria y deshabilita `raw`).
 - **CSV**: `GET /api/v1/devices/:id/export/csv` (botón en la ficha).
 - **Mapa**: `frontend/src/components/map/SensorMap.tsx` (react-leaflet +
   OpenStreetMap en ambos temas, zoom con rueda, popup por sonda).
 - **Física CRNS en la ficha** (`frontend/src/pages/DeviceDetail.tsx`):
-  tarjeta **N_raw (n/s)** con el último recuento (vía REST
-  `latest_neutron_counts` o SSE en vivo) y tarjeta **D86** con la profundidad
-  efectiva `D₈₆ = 12.4 / (0.3 + θ/100)` cm calculada de la humedad suavizada.
-  El histórico expone `neutron_counts` (raw) y `avg_neutron_counts` (buckets)
-  y el CSV incluye ambas columnas.
+  tarjeta **N_raw (cuantos)** con el último recuento (vía REST
+  `latest_neutron_counts` —último N no nulo— o SSE en vivo) y tarjeta **D86**
+  con la profundidad efectiva `D₈₆ = 12.4 / (0.3 + θ/100)` cm calculada de la
+  humedad suavizada. La tabla de histórico muestra Fecha/Hora, Humedad,
+  **Neutrones**, Temperatura, Batería, Presión, RSSI y Muestras. El histórico
+  expone `neutron_counts` (raw) y `avg_neutron_counts` (buckets) y el CSV
+  incluye ambas columnas.
 
 ---
 
@@ -405,12 +426,15 @@ El KPI «Batería Baja» usa `isLowBattery()`: umbrales **> 15 se leen como %**
 
 - **Arranque**: `src/main.tsx` → `App.tsx` (rutas `/login`, `/`, `/devices`,
   `/devices/:id`, `/map`, `/alerts`, `/admin` con guardias por rol).
-- **Layout**: `components/layout/` — `AppLayout`, `Navbar` (tema, idioma sin
-  banderas, campana de alertas), `Sidebar`, `Logo` (lee `/logo.png` de
-  `public/`; ver `public/LEEME-logo.md` para el PNG 703×703 con transparencia).
+- **Layout**: `components/layout/` — `AppLayout`, `Navbar` (hamburger en móvil,
+  tema, idioma sin banderas, campana de alertas), `Sidebar` (escritorio) +
+  drawer móvil con las mismas opciones, `Logo` (lee `/logo.png` de `public/`;
+  ver `public/LEEME-logo.md` para el PNG 703×703 con transparencia).
+  Responsive: grids adaptativos, tablas con scroll-x, badges sin saltos
+  (`whitespace-nowrap`, 9px) y `ErrorBoundary` raíz ante fallos de render.
 - **Estado global**: `context/ThemeContext.tsx` (claro/oscuro, persiste en
   `localStorage`) y `context/LanguageContext.tsx` (11 idiomas + RTL árabe).
-- **i18n**: `src/i18n/translations.ts` — **195 claves × 11 idiomas**
+- **i18n**: `src/i18n/translations.ts` — **199 claves × 11 idiomas**
   (`es en gl zh hi fr ar pt de ru it`); `src/utils/labels.ts` traduce estados
   (`triggered…`) y severidades; los filtros y badges nunca muestran claves.
 - **Auth**: `hooks/useAuth.tsx` (JWT `cornea_jwt` + usuario `cornea_user`);
@@ -468,8 +492,10 @@ npm --prefix simulator run load-test          # 100 sondas cada 2 s (carga)
 
 > Con Docker no hace falta arrancarlo a mano: el servicio `simulator` del
 > compose (modo neutrónico + anomalías cada 30 min, como las sondas físicas)
-> envía la primera ráfaga nada más conectar, así que la tarjeta N_raw se
-> rellena sola al levantar el stack. `SIM_INTERVAL_MS` lo acelera.
+> envía al conectar un **backfill de 10 muestras históricas** por sonda y la
+> primera ráfaga en vivo, así que gráfica y tarjeta N_raw se rellenan solas
+> al levantar el stack. `SIM_INTERVAL_MS` lo acelera y `SIM_BACKFILL`
+> ajusta el histórico inicial (idempotente gracias a la unicidad).
 # Ejemplo avanzado (ejecutar dentro de simulator/):
 # node mock-lora-devices.js --count 20 --interval 10000 --url mqtt://<broker>:1883 --user iot --pass changeme
 ```

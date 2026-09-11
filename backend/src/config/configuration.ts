@@ -18,6 +18,10 @@ export default () => ({
     username: process.env.MQTT_USERNAME || 'iot',
     password: process.env.MQTT_PASSWORD || 'changeme',
     topicSubscription: process.env.MQTT_TOPIC_SUBSCRIPTION || 'application/+/device/+/event/up',
+    // Solo el worker debe suscribirse al broker. La API también instancia
+    // este servicio (mismo AppModule): si ambos se suscriben, cada uplink
+    // se procesa DOS veces (filas, alertas y SSE duplicados).
+    subscribe: process.env.MQTT_SUBSCRIBE !== 'false',
   },
   jwt: {
     secret: process.env.JWT_SECRET || 'super_secret_jwt_key_32_characters_minimum_entropy_random_hex',

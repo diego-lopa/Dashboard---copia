@@ -36,11 +36,23 @@ export const DeviceDetail: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [chartLoading, setChartLoading] = useState<boolean>(false);
 
-  // Time range & Aggregation state
+  // Time range & Aggregation state (carga bajo demanda al seleccionar rango)
   const [timeRange, setTimeRange] = useState<string>('24h');
   const [interval, setInterval] = useState<string>('15m');
-  const [customFrom] = useState<string>('');
-  const [customTo] = useState<string>('');
+
+  // Agregación recomendada por rango para no saturar la gráfica
+  const handleRangeChange = (range: string) => {
+    setTimeRange(range);
+    if (range === '8h') setInterval('5m');
+    else if (range === '24h') setInterval('15m');
+    else if (range === '30d') setInterval('1h');
+    else if (range === 'full') setInterval('1d');
+  };
+
+  // El registro completo siempre va agregado (nunca raw, para acotar filas)
+  useEffect(() => {
+    if (timeRange === 'full' && interval === 'raw') setInterval('1d');
+  }, [timeRange, interval]);
 
   const loadDevice = async () => {
     try {
@@ -58,17 +70,14 @@ export const DeviceDetail: React.FC = () => {
       let fromDate = new Date();
       let toDate = new Date();
 
-      if (timeRange === '1h') {
-        fromDate = subHours(new Date(), 1);
+      if (timeRange === '8h') {
+        fromDate = subHours(new Date(), 8);
       } else if (timeRange === '24h') {
         fromDate = subHours(new Date(), 24);
-      } else if (timeRange === '7d') {
-        fromDate = subDays(new Date(), 7);
       } else if (timeRange === '30d') {
         fromDate = subDays(new Date(), 30);
-      } else if (timeRange === 'custom' && customFrom && customTo) {
-        fromDate = new Date(customFrom);
-        toDate = new Date(customTo);
+      } else if (timeRange === 'full') {
+        fromDate = new Date('2000-01-01T00:00:00Z');
       }
 
       const res = await apiClient.get(`/devices/${id}/measurements`, {
@@ -121,14 +130,10 @@ export const DeviceDetail: React.FC = () => {
     let fromDate = new Date();
     let toDate = new Date();
 
-    if (timeRange === '1h') fromDate = subHours(new Date(), 1);
+    if (timeRange === '8h') fromDate = subHours(new Date(), 8);
     else if (timeRange === '24h') fromDate = subHours(new Date(), 24);
-    else if (timeRange === '7d') fromDate = subDays(new Date(), 7);
     else if (timeRange === '30d') fromDate = subDays(new Date(), 30);
-    else if (timeRange === 'custom' && customFrom && customTo) {
-      fromDate = new Date(customFrom);
-      toDate = new Date(customTo);
-    }
+    else if (timeRange === 'full') fromDate = new Date('2000-01-01T00:00:00Z');
 
     const token = localStorage.getItem('cornea_jwt');
     const exportUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/devices/${id}/export/csv?from=${fromDate.toISOString()}&to=${toDate.toISOString()}&interval=${interval}`;
@@ -226,11 +231,11 @@ export const DeviceDetail: React.FC = () => {
           </div>
           <p className="text-xl font-bold text-indigo-400">
             {device.latest_neutron_counts !== undefined && device.latest_neutron_counts !== null
-              ? `${device.latest_neutron_counts} n/s`
+              ? `${device.latest_neutron_counts}`
               : '--'}
           </p>
           <p className={`text-[10px] mt-1 ${isDark ? 'text-indigo-300/80' : 'text-indigo-700'}`}>
-            N₀=143 · Geant4
+            {t('neutron_unit')} · N₀=143 · Geant4
           </p>
         </div>
 
@@ -347,14 +352,14 @@ export const DeviceDetail: React.FC = () => {
         <div className={`flex items-center space-x-1 p-1 rounded-xl border ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-slate-100 border-slate-300'}`}>
           <Calendar className={`w-3.5 h-3.5 ml-2 mr-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
           {[
-            { id: '1h', label: t('range_1h') },
+            { id: '8h', label: t('range_8h') },
             { id: '24h', label: t('range_24h') },
-            { id: '7d', label: t('range_7d') },
             { id: '30d', label: t('range_30d') },
+            { id: 'full', label: t('range_full') },
           ].map((r) => (
             <button
               key={r.id}
-              onClick={() => setTimeRange(r.id)}
+              onClick={() => handleRangeChange(r.id)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
                 timeRange === r.id
                   ? 'bg-emerald-500 text-white shadow'
@@ -377,7 +382,7 @@ export const DeviceDetail: React.FC = () => {
               isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900'
             }`}
           >
-            <option value="raw">{t('raw_points')}</option>
+            {timeRange !== 'full' && <option value="raw">{t('raw_points')}</option>}
             <option value="1m">{t('interval_1m')}</option>
             <option value="5m">{t('interval_5m')}</option>
             <option value="15m">{t('interval_15m')}</option>
@@ -417,9 +422,10 @@ export const DeviceDetail: React.FC = () => {
           <table className={`w-full text-left text-xs ${isDark ? 'text-slate-300' : 'text-slate-800'}`}>
             <thead className={`sticky top-0 text-[10px] uppercase border-b ${isDark ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
               <tr>
-                <th className="py-2.5 px-4">{t('date_time_utc')}</th>
-                <th className="py-2.5 px-4">{t('soil_moisture')}</th>
-                <th className="py-2.5 px-4">{t('temperature')}</th>
+                <th className="py-2.5 px-4 whitespace-nowrap">{t('date_time_utc')}</th>
+                <th className="py-2.5 px-4 whitespace-nowrap">{t('soil_moisture')}</th>
+                <th className="py-2.5 px-4 whitespace-nowrap">{t('neutrons_col')}</th>
+                <th className="py-2.5 px-4 whitespace-nowrap">{t('temperature')}</th>
                 <th className="py-2.5 px-4">{t('battery')}</th>
                 <th className="py-2.5 px-4">{t('pressure_label')}</th>
                 <th className="py-2.5 px-4">RSSI</th>
@@ -432,10 +438,13 @@ export const DeviceDetail: React.FC = () => {
                   <td className={`py-2 px-4 font-mono text-[11px] ${isDark ? 'text-white' : 'text-slate-900'}`}>
                     {formatDateTime(row.bucket || row.time || '', 'yyyy-MM-dd HH:mm:ss')}
                   </td>
-                  <td className="py-2 px-4 text-emerald-500 font-medium">
+                  <td className="py-2 px-4 text-emerald-500 font-medium whitespace-nowrap">
                     {row.avg_humidity ?? row.humidity ?? '--'}%
                   </td>
-                  <td className="py-2 px-4 text-amber-500 font-medium">
+                  <td className="py-2 px-4 text-indigo-400 font-medium whitespace-nowrap">
+                    {row.avg_neutron_counts ?? row.neutron_counts ?? '--'}
+                  </td>
+                  <td className="py-2 px-4 text-amber-500 font-medium whitespace-nowrap">
                     {row.avg_temperature ?? row.temperature ?? '--'}°C
                   </td>
                   <td className="py-2 px-4 text-purple-500 font-medium">

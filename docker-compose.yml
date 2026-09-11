@@ -137,6 +137,8 @@ services:
       - MQTT_URL=mqtt://mosquitto:1883
       - MQTT_USERNAME=${MQTT_USERNAME:-iot}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-changeme}
+      # La API NO se suscribe a MQTT (solo el worker) para no duplicar ingesta
+      - MQTT_SUBSCRIBE=false
       - JWT_SECRET=${JWT_SECRET:-super_secret_jwt_key_32_characters_minimum_entropy_random_hex}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
       - API_KEY_INGEST=${API_KEY_INGEST:-secret_ingest_key_for_http_gateways_123456}
@@ -184,6 +186,8 @@ services:
       - MQTT_USERNAME=${MQTT_USERNAME:-iot}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-changeme}
       - MQTT_TOPIC_SUBSCRIPTION=application/+/device/+/event/up
+      # Único suscriptor MQTT del stack (la API lo lleva desactivado)
+      - MQTT_SUBSCRIBE=true
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_USER=${SMTP_USER:-}
@@ -240,6 +244,8 @@ services:
       - INTERVAL_MS=${SIM_INTERVAL_MS:-1800000}
       - NEUTRON_MODE=${SIM_NEUTRON_MODE:-true}
       - INJECT_ANOMALIES=${SIM_ANOMALIES:-true}
+      # Histórico inicial (muestras por sensor, cada INTERVAL_MS) al conectar
+      - SIM_BACKFILL=${SIM_BACKFILL:-10}
     networks:
       - cornea_net
 

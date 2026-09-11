@@ -63,13 +63,16 @@ export class IngestionService {
         this.smoothedHumidityMap.set(device.id, smoothedHumidity);
       }
 
-      // 3. Persistir en TimescaleDB Hypertable (humedad suavizada + N_raw)
+      // 3. Persistir en TimescaleDB Hypertable (humedad suavizada + N_raw).
+      // ON CONFLICT DO NOTHING (ver migración 003): reintentos y backfills
+      // con el mismo (device_id, time) no duplican filas.
       const insertSql = `
         INSERT INTO measurements (
           time, device_id, humidity, temperature, pressure, battery,
           latitude, longitude, rssi, snr, gateway_id, fcnt_up, raw_payload, valid,
           neutron_counts
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ON CONFLICT DO NOTHING;
       `;
 
       await this.db.query(insertSql, [

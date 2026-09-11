@@ -49,8 +49,8 @@ export const DevicesList: React.FC = () => {
     groupName: 'General',
     latitude: '',
     longitude: '',
-    humidityMinThreshold: 30,
-    humidityMaxThreshold: 80,
+    humidityMinThreshold: 15,
+    humidityMaxThreshold: 85,
     batteryThreshold: 20,
   });
 
@@ -78,8 +78,8 @@ export const DevicesList: React.FC = () => {
       groupName: 'General',
       latitude: '',
       longitude: '',
-      humidityMinThreshold: 30,
-      humidityMaxThreshold: 80,
+      humidityMinThreshold: 15,
+      humidityMaxThreshold: 85,
       batteryThreshold: 20,
     });
     setIsModalOpen(true);
@@ -94,8 +94,8 @@ export const DevicesList: React.FC = () => {
       groupName: dev.group_name || 'General',
       latitude: dev.latitude !== undefined && dev.latitude !== null ? String(dev.latitude) : '',
       longitude: dev.longitude !== undefined && dev.longitude !== null ? String(dev.longitude) : '',
-      humidityMinThreshold: dev.humidity_min_threshold || 30,
-      humidityMaxThreshold: dev.humidity_max_threshold || 80,
+      humidityMinThreshold: dev.humidity_min_threshold || 15,
+      humidityMaxThreshold: dev.humidity_max_threshold || 85,
       batteryThreshold: dev.battery_threshold || 20,
     });
     setIsModalOpen(true);
@@ -402,8 +402,8 @@ export const DevicesList: React.FC = () => {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2 sm:col-span-1">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-1">
                   <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                     {t('dev_eui')} (16 hex)
                   </label>
@@ -420,7 +420,7 @@ export const DevicesList: React.FC = () => {
                   />
                 </div>
 
-                <div className="col-span-2 sm:col-span-1">
+                <div className="sm:col-span-1">
                   <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                     {t('sensor_name')}
                   </label>
@@ -481,7 +481,7 @@ export const DevicesList: React.FC = () => {
                 </div>
               </div>
 
-              <div className={`grid grid-cols-2 gap-3 pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
                 <div>
                   <label className="block text-xs font-semibold text-amber-500 mb-1">
                     {t('min_humidity_thresh')}

@@ -15,18 +15,31 @@ async function seed() {
   try {
     const client = await pool.connect();
 
-    // 1. Crear o recuperar Tenant
-    const tenantRes = await client.query(`
-      INSERT INTO tenants (name)
-      VALUES ('Neutron Insights - Agro & IoT Sector')
-      ON CONFLICT DO NOTHING
-      RETURNING id;
+    // 1. Recuperar o crear Tenant (determinista: nunca duplica).
+    // Prioridad: tenant con dispositivos > tenant más antiguo > crear uno.
+    const existingTenant = await client.query(`
+      (SELECT tenant_id AS id FROM devices LIMIT 1)
+      UNION ALL
+      (SELECT id FROM tenants ORDER BY created_at ASC LIMIT 1)
+      LIMIT 1;
     `);
 
-    let tenantId = tenantRes.rows[0]?.id;
+    let tenantId = existingTenant.rows[0]?.id;
     if (!tenantId) {
-      const existing = await client.query(`SELECT id FROM tenants LIMIT 1;`);
-      tenantId = existing.rows[0].id;
+      const created = await client.query(`
+        INSERT INTO tenants (name)
+        VALUES ('Neutron Insights - Agro & IoT Sector')
+        ON CONFLICT (name) DO NOTHING
+        RETURNING id;
+      `);
+      tenantId = created.rows[0]?.id;
+      if (!tenantId) {
+        const fallback = await client.query(`SELECT id FROM tenants ORDER BY created_at ASC LIMIT 1;`);
+        tenantId = fallback.rows[0]?.id;
+      }
+    }
+    if (!tenantId) {
+      throw new Error('No se pudo determinar el tenant');
     }
     console.log(`✅ Tenant listo: ${tenantId}`);
 
@@ -56,8 +69,8 @@ async function seed() {
         group_name: 'Pontevedra - Lago de Castiñeiras',
         latitude: 42.348600,
         longitude: -8.674700,
-        humidity_min: 20.0,
-        humidity_max: 65.0,
+        humidity_min: 15.0,
+        humidity_max: 85.0,
       },
       {
         dev_eui: '0011223344556602',
@@ -66,8 +79,8 @@ async function seed() {
         group_name: 'Pontevedra - Lago de Castiñeiras',
         latitude: 42.349500,
         longitude: -8.673800,
-        humidity_min: 20.0,
-        humidity_max: 65.0,
+        humidity_min: 15.0,
+        humidity_max: 85.0,
       },
       {
         dev_eui: '0011223344556603',
@@ -76,8 +89,8 @@ async function seed() {
         group_name: 'Santiago - Polígono da Sionlla',
         latitude: 42.913500,
         longitude: -8.513200,
-        humidity_min: 20.0,
-        humidity_max: 65.0,
+        humidity_min: 15.0,
+        humidity_max: 85.0,
       },
       {
         dev_eui: '0011223344556604',
@@ -86,8 +99,8 @@ async function seed() {
         group_name: 'Santiago - Polígono da Sionlla',
         latitude: 42.914200,
         longitude: -8.512000,
-        humidity_min: 20.0,
-        humidity_max: 65.0,
+        humidity_min: 15.0,
+        humidity_max: 85.0,
       },
       {
         dev_eui: '0011223344556605',
@@ -96,8 +109,8 @@ async function seed() {
         group_name: 'Pontevedra - Monte Aloia (Tui)',
         latitude: 42.068200,
         longitude: -8.675000,
-        humidity_min: 20.0,
-        humidity_max: 65.0,
+        humidity_min: 15.0,
+        humidity_max: 85.0,
       },
     ];
 
@@ -131,17 +144,55 @@ async function seed() {
     }
     console.log(`✅ ${deviceIds.length} dispositivos LoRaWAN registrados`);
 
-    // 4. Crear Reglas de Alerta Predeterminadas
+    // 4. Reglas de Alerta Predeterminadas (rango humedad 15–85 %: fuera de rango dispara).
+    // 4a. Normalizar reglas globales de humedad existentes (idempotente, no duplica)
     await client.query(`
-      INSERT INTO alert_rules (tenant_id, name, metric, condition, threshold, duration_seconds, hysteresis, severity, enabled, channels)
-      VALUES 
-        ('${tenantId}', 'Alerta Global: Humedad Excesiva (>80%)', 'humidity', '>=', 80.0, 300, 3.0, 'warning', true, '["webhook", "email"]'::jsonb),
-        ('${tenantId}', 'Alerta Global: Estrés Hídrico Crítico (<30%)', 'humidity', '<=', 30.0, 300, 3.0, 'critical', true, '["webhook", "email"]'::jsonb),
-        ('${tenantId}', 'Alerta Global: Batería Sensor Baja (<20%)', 'battery', '<=', 20.0, 0, 1.0, 'warning', true, '["webhook"]'::jsonb),
-        ('${tenantId}', 'Alerta Global: Calidad de Señal Débil (RSSI < -115 dBm)', 'rssi', '<=', -115.0, 600, 2.0, 'low', true, '["webhook"]'::jsonb)
-      ON CONFLICT DO NOTHING;
+      UPDATE alert_rules
+      SET name = 'Alerta Global: Humedad Excesiva (>85%)', threshold = 85.0,
+          severity = 'warning', hysteresis = 3.0, duration_seconds = 300,
+          enabled = true, updated_at = now()
+      WHERE metric = 'humidity' AND condition = '>=' AND device_id IS NULL;
     `);
-    console.log('✅ Reglas de alerta configuradas');
+    await client.query(`
+      UPDATE alert_rules
+      SET name = 'Alerta Global: Estrés Hídrico Crítico (<15%)', threshold = 15.0,
+          severity = 'critical', hysteresis = 3.0, duration_seconds = 300,
+          enabled = true, updated_at = now()
+      WHERE metric = 'humidity' AND condition = '<=' AND device_id IS NULL;
+    `);
+    // 4b. Eliminar reglas duplicadas sin eventos (el seed antiguo las duplicaba al reejecutarse)
+    await client.query(`
+      DELETE FROM alert_rules
+      WHERE id IN (
+        SELECT id FROM (
+          SELECT id, ROW_NUMBER() OVER (
+            PARTITION BY tenant_id, metric, condition, COALESCE(device_id::text, '')
+            ORDER BY created_at, id
+          ) AS rn
+          FROM alert_rules
+        ) t WHERE rn > 1
+      )
+      AND NOT EXISTS (SELECT 1 FROM alert_events e WHERE e.rule_id = alert_rules.id);
+    `);
+    // 4c. Crear las que falten (solo instalaciones frescas, sin duplicar)
+    const defaultRules = [
+      { name: 'Alerta Global: Humedad Excesiva (>85%)', metric: 'humidity', condition: '>=', threshold: 85.0, duration: 300, hyst: 3.0, severity: 'warning', channels: '["webhook", "email"]' },
+      { name: 'Alerta Global: Estrés Hídrico Crítico (<15%)', metric: 'humidity', condition: '<=', threshold: 15.0, duration: 300, hyst: 3.0, severity: 'critical', channels: '["webhook"]' },
+      { name: 'Alerta Global: Batería Sensor Baja (<20%)', metric: 'battery', condition: '<=', threshold: 20.0, duration: 0, hyst: 1.0, severity: 'warning', channels: '["webhook"]' },
+      { name: 'Alerta Global: Calidad de Señal Débil (RSSI < -115 dBm)', metric: 'rssi', condition: '<=', threshold: -115.0, duration: 600, hyst: 2.0, severity: 'low', channels: '["webhook"]' },
+    ];
+    for (const r of defaultRules) {
+      await client.query(
+        `INSERT INTO alert_rules (tenant_id, name, metric, condition, threshold, duration_seconds, hysteresis, severity, enabled, channels)
+         SELECT $1::uuid, $2::varchar, $3::varchar, $4::varchar, $5::float8, $6::int, $7::float8, $8::varchar, true, $9::jsonb
+         WHERE NOT EXISTS (
+           SELECT 1 FROM alert_rules
+           WHERE tenant_id = $1::uuid AND metric = $3::varchar AND condition = $4::varchar AND device_id IS NULL
+         );`,
+        [tenantId, r.name, r.metric, r.condition, r.threshold, r.duration, r.hyst, r.severity, r.channels],
+      );
+    }
+    console.log('✅ Reglas de alerta configuradas (rango 15–85 %)');
 
     // 5. Generar Histórico de Mediciones de Ejemplo (Últimas 48 horas)
     console.log('⏳ Generando histórico de 48 horas de telemetría para demostración...');

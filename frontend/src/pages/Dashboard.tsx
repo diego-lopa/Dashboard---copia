@@ -287,8 +287,8 @@ export const Dashboard: React.FC = () => {
           <TelemetryChart
             data={globalHistory}
             interval="15m"
-            humidityMin={devices[0]?.humidity_min_threshold || 30}
-            humidityMax={devices[0]?.humidity_max_threshold || 80}
+            humidityMin={devices[0]?.humidity_min_threshold || 15}
+            humidityMax={devices[0]?.humidity_max_threshold || 85}
           />
         </div>
 

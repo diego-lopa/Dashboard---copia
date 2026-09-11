@@ -31,6 +31,11 @@ const SENSOR_COUNT = parseInt(process.env.SENSOR_COUNT || getArg('--count', '5')
 const INTERVAL_MS = parseInt(process.env.INTERVAL_MS || getArg('--interval', '1800000'), 10);
 const INJECT_ANOMALIES =
   process.env.INJECT_ANOMALIES === 'false' ? false : args.includes('--anomalies') || true;
+// Backfill inicial: N muestras históricas (cada INTERVAL_MS) al conectar para
+// que la gráfica tenga datos desde el arranque. Sin anomalías e idempotente
+// (timestamps en frontera de intervalo + ON CONFLICT en ingesta, migración 003).
+const BACKFILL_RAW = parseInt(process.env.SIM_BACKFILL || getArg('--backfill', '10'), 10);
+const BACKFILL = Number.isNaN(BACKFILL_RAW) ? 10 : Math.max(0, BACKFILL_RAW);
 // Modo neutrónico CRNS: envía neutron_counts y el backend calcula θ con Geant4
 const NEUTRON_MODE = args.includes('--neutrons') || process.env.NEUTRON_MODE === 'true';
 
@@ -96,7 +101,7 @@ const client = mqtt.connect(MQTT_URL, {
   clientId: `lora_sim_${Math.random().toString(16).substring(2, 8)}`,
 });
 
-const transmitUplinks = (tick) => {
+const transmitUplinks = (tick, timeOverride, anomaliesOn = INJECT_ANOMALIES) => {
   sensors.forEach((sensor, idx) => {
     // 1. Simular fluctuaciones naturales
     let humidity = sensor.baseHumidity + Math.sin(tick * 0.2 + idx) * 5 + (Math.random() * 2 - 1);
@@ -106,7 +111,7 @@ const transmitUplinks = (tick) => {
     let snr = +(7.5 + (Math.random() * 3 - 1.5)).toFixed(1);
 
     // Inyección periódica de anomalías para probar disparo y resolución de alertas (Histéresis)
-    if (INJECT_ANOMALIES && idx === 0) {
+    if (anomaliesOn && idx === 0) {
       if (tick % 6 >= 3) {
         humidity = 86.4 + Math.random() * 3;
       } else {
@@ -114,7 +119,7 @@ const transmitUplinks = (tick) => {
       }
     }
 
-    if (INJECT_ANOMALIES && idx === 1 && tick % 8 >= 5) {
+    if (anomaliesOn && idx === 1 && tick % 8 >= 5) {
       humidity = 24.5 - Math.random() * 2;
     }
 
@@ -139,7 +144,7 @@ const transmitUplinks = (tick) => {
         deviceName: sensor.name,
         devEui: sensor.devEui.toLowerCase(),
       },
-      time: new Date().toISOString(),
+      time: timeOverride || new Date().toISOString(),
       fCnt: sensor.fcnt,
       fPort: 2,
       data: Buffer.from([
@@ -179,6 +184,17 @@ const transmitUplinks = (tick) => {
 client.on('connect', () => {
   console.log('✅ Conectado exitosamente al broker MQTT Mosquitto');
   console.log('🚀 Enviando primera ráfaga inicial de telemetría...\n');
+
+  // Backfill: histórico inicial de BACKFILL muestras por sensor (más antigua
+  // primero), sin anomalías y con timestamps en frontera de intervalo.
+  if (BACKFILL > 0) {
+    const grid = Math.max(1000, INTERVAL_MS);
+    const base = Math.floor(Date.now() / grid) * grid;
+    for (let b = BACKFILL - 1; b >= 0; b--) {
+      transmitUplinks(1000 + (BACKFILL - b), new Date(base - b * INTERVAL_MS).toISOString(), false);
+    }
+    console.log(`📦 Backfill: ${BACKFILL} muestras históricas por sensor enviadas.`);
+  }
 
   let tick = 1;
   transmitUplinks(tick);

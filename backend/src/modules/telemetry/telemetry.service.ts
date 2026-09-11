@@ -110,7 +110,7 @@ export class TelemetryService {
         'RSSI (dBm)',
         'SNR (dB)',
         'FCntUp',
-        'NeutronCounts (n/s)',
+        'NeutronCounts',
       ];
 
       const csvLines = [headers.join(',')];
@@ -148,7 +148,7 @@ export class TelemetryService {
         'Avg Pressure (hPa)',
         'Avg Battery (V)',
         'Avg RSSI (dBm)',
-        'Avg NeutronCounts (n/s)',
+        'Avg NeutronCounts',
         'Samples',
       ];
 
