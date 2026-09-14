@@ -22,16 +22,28 @@ export const SensorMap: React.FC<SensorMapProps> = ({ devices, height = '300px' 
   const { t } = useLanguage();
   const isDark = theme === 'dark';
 
+  // Ocultar sondas desactivadas y las desmarcadas en Sensores CORNEA
+  const visibleDevices = (() => {
+    try {
+      const raw = localStorage.getItem('cornea_visible_sensors');
+      if (raw === null) return devices.filter((d) => d.enabled);
+      const hidden = new Set(JSON.parse(raw) as string[]);
+      return devices.filter((d) => d.enabled && hidden.has(d.id));
+    } catch {
+      return devices.filter((d) => d.enabled);
+    }
+  })();
+
   const withCoords = useMemo(
     () =>
-      devices.filter(
+      visibleDevices.filter(
         (d) =>
           typeof d.latitude === 'number' &&
           typeof d.longitude === 'number' &&
           !Number.isNaN(d.latitude) &&
           !Number.isNaN(d.longitude),
       ),
-    [devices],
+    [visibleDevices],
   );
 
   const center: [number, number] = useMemo(() => {
@@ -40,21 +52,6 @@ export const SensorMap: React.FC<SensorMapProps> = ({ devices, height = '300px' 
     const lon = withCoords.reduce((s, d) => s + (d.longitude || 0), 0) / withCoords.length;
     return [lat, lon];
   }, [withCoords]);
-
-  if (withCoords.length === 0) {
-    return (
-      <div
-        style={{ height }}
-        className={`w-full rounded-2xl border flex items-center justify-center text-xs ${
-          isDark
-            ? 'bg-slate-900 border-slate-700 text-slate-400'
-            : 'bg-slate-50 border-slate-200 text-slate-600'
-        }`}
-      >
-        {t('map_subtitle')}
-      </div>
-    );
-  }
 
   return (
     <div

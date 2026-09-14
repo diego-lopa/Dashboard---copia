@@ -16,6 +16,8 @@ export interface DeviceEntity {
   group_name?: string;
   latitude?: number;
   longitude?: number;
+  place_name?: string | null;
+  pressure?: number | null;
   enabled: boolean;
   last_seen_at?: string;
   battery_threshold?: number;
@@ -29,7 +31,7 @@ export interface DeviceEntity {
   latest_battery?: number;
   latest_rssi?: number;
   latest_snr?: number;
-  /** Último recuento bruto de neutrones CRNS (n/s). */
+  /** Último recuento bruto de neutrones CRNS (cuantos, promedio 30 min). */
   latest_neutron_counts?: number;
   status?: 'online' | 'warning' | 'critical' | 'offline';
 }

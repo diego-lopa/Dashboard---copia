@@ -50,6 +50,12 @@ export class IngestionService {
 
       const timestamp = uplink.timestamp ? new Date(uplink.timestamp).toISOString() : new Date().toISOString();
 
+      // Si el uplink no trae presión, usar la del sitio de la sonda (si fue
+      // informada en el alta o vía AEMET/Open-Meteo), si no la del modelo.
+      if (uplink.pressure === undefined && (device as any).pressure !== undefined && (device as any).pressure !== null) {
+        uplink.pressure = Number((device as any).pressure);
+      }
+
       // 3. Suavizado Exponencial (EMA, α=0.3) contra ruido de Poisson del detector.
       //    Todos los sensores se tratan igual: si la humedad se calculó desde
       //    neutrones CRNS o vino directa, se suaviza antes de persistir.

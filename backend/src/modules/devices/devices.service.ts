@@ -156,17 +156,34 @@ export class DevicesService {
   }
 
   async create(tenantId: string, dto: CreateDeviceDto) {
-    const devEui = dto.devEui.toUpperCase().trim();
-    const existing = await this.db.query('SELECT id FROM devices WHERE dev_eui = $1', [devEui]);
-    if (existing.rows.length > 0) {
-      throw new ConflictException(`El DevEUI ${devEui} ya se encuentra registrado`);
+    let devEui = (dto.devEui || '').trim().toUpperCase();
+    if (!devEui) {
+      const { randomBytes } = await import('crypto');
+      for (let attempts = 0; attempts < 5; attempts++) {
+        const candidate = randomBytes(8).toString('hex').toUpperCase();
+        const dup = await this.db.query('SELECT id FROM devices WHERE dev_eui = $1', [candidate]);
+        if (dup.rows.length === 0) {
+          devEui = candidate;
+          break;
+        }
+      }
+      if (!devEui) throw new ConflictException('No se pudo generar un DevEUI único, reintenta');
+    } else {
+      if (!/^[0-9A-F]{16}$/.test(devEui)) {
+        throw new ConflictException('El DevEUI debe tener 16 caracteres hexadecimales');
+      }
+      const existing = await this.db.query('SELECT id FROM devices WHERE dev_eui = $1', [devEui]);
+      if (existing.rows.length > 0) {
+        throw new ConflictException(`El DevEUI ${devEui} ya se encuentra registrado`);
+      }
     }
 
     const query = `
       INSERT INTO devices (
         tenant_id, dev_eui, name, description, group_name, latitude, longitude,
+        place_name, pressure,
         enabled, battery_threshold, humidity_min_threshold, humidity_max_threshold
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
       RETURNING *;
     `;
     const res = await this.db.query(query, [
@@ -175,12 +192,14 @@ export class DevicesService {
       dto.name.trim(),
       dto.description || null,
       dto.groupName || 'General',
-      dto.latitude || null,
-      dto.longitude || null,
+      dto.latitude ?? null,
+      dto.longitude ?? null,
+      dto.placeName?.trim() || null,
+      dto.pressure ?? null,
       dto.enabled !== undefined ? dto.enabled : true,
-      dto.batteryThreshold || 20.0,
-      dto.humidityMinThreshold || 30.0,
-      dto.humidityMaxThreshold || 80.0,
+      dto.batteryThreshold ?? 20.0,
+      dto.humidityMinThreshold ?? 15.0,
+      dto.humidityMaxThreshold ?? 85.0,
     ]);
 
     return res.rows[0];
@@ -212,6 +231,14 @@ export class DevicesService {
     if (dto.longitude !== undefined) {
       fields.push(`longitude = $${idx++}`);
       values.push(dto.longitude);
+    }
+    if ((dto as any).placeName !== undefined) {
+      fields.push(`place_name = $${idx++}`);
+      values.push((dto as any).placeName?.trim() || null);
+    }
+    if ((dto as any).pressure !== undefined) {
+      fields.push(`pressure = $${idx++}`);
+      values.push((dto as any).pressure ?? null);
     }
     if (dto.enabled !== undefined) {
       fields.push(`enabled = $${idx++}`);

@@ -32,10 +32,7 @@ interface PlatformUser {
 
 type SvcState = 'checking' | 'online' | 'offline';
 
-const API_BASE = (import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1').replace(
-  /\/api\/v1\/?$/,
-  '',
-);
+const API_BASE = (import.meta.env.VITE_API_URL || '/api/v1').replace(/\/api\/v1\/?$/, '') || '';
 // Clave de demo del .env del proyecto (API_KEY_INGEST). Cambiar si se personaliza en el backend.
 const DEFAULT_INGEST_KEY = 'secret_ingest_key_for_http_gateways_123456';
 
@@ -277,12 +274,17 @@ export const AdminView: React.FC = () => {
     }
   };
 
+  // Health relativo: funciona igual en localhost y en devtunnel (https).
+  // Si VITE_API_URL es /api/v1 -> /health -> nginx -> backend (fuera de /api).
+  // Si es http://host:8000/api/v1 -> http://host:8000/health.
+  const healthUrl = API_BASE ? `${API_BASE}/health` : '/health';
+
   // ── Checks de servicios ───────────────────────────────────
   const checkApi = async () => {
     setApiStatus('checking');
     const t0 = performance.now();
     try {
-      const res = await fetch(`${API_BASE}/health`);
+      const res = await fetch(healthUrl);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await res.json();
       setApiLatency(Math.round(performance.now() - t0));
@@ -334,9 +336,11 @@ export const AdminView: React.FC = () => {
   };
 
   const checkServices = () => {
+    // Lanzar en paralelo: antes checkApi bloqueaba visualmente a checkDb/checkMqtt
     checkApi();
+    // Pequeño desfase para no saturar el navegador con 3 fetches simultáneos exactos
     checkDb();
-    checkMqtt();
+    setTimeout(checkMqtt, 150);
   };
 
   useEffect(() => {

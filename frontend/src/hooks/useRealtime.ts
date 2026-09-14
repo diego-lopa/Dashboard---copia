@@ -5,8 +5,14 @@ export const useRealtime = (onEventReceived?: (event: RealtimeEvent) => void) =>
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const eventSourceRef = useRef<EventSource | null>(null);
 
+  const handlerRef = useRef(onEventReceived);
   useEffect(() => {
-    const streamUrl = `${import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1'}/stream/events`;
+    handlerRef.current = onEventReceived;
+  }, [onEventReceived]);
+
+  useEffect(() => {
+    const base = import.meta.env.VITE_API_URL || '/api/v1';
+    const streamUrl = `${base.replace(/\/$/, '')}/stream/events`;
 
     const connect = () => {
       try {
@@ -20,8 +26,8 @@ export const useRealtime = (onEventReceived?: (event: RealtimeEvent) => void) =>
         es.onmessage = (messageEvent) => {
           try {
             const parsedData: RealtimeEvent = JSON.parse(messageEvent.data);
-            if (onEventReceived) {
-              onEventReceived(parsedData);
+            if (handlerRef.current) {
+              handlerRef.current(parsedData);
             }
           } catch (e) {
             console.error('Error parseando evento SSE:', e);
@@ -47,7 +53,7 @@ export const useRealtime = (onEventReceived?: (event: RealtimeEvent) => void) =>
         eventSourceRef.current.close();
       }
     };
-  }, [onEventReceived]);
+  }, []);
 
   return { isConnected };
 };

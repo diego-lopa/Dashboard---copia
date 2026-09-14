@@ -21,6 +21,8 @@ import {
   ArrowUpRight,
   ShieldAlert,
   Check,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { es, enUS } from 'date-fns/locale';
 import { batteryPercent, isLowBattery } from '../utils/battery';
@@ -36,27 +38,33 @@ export const Dashboard: React.FC = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [alerts, setAlerts] = useState<AlertEvent[]>([]);
   const [globalHistory, setGlobalHistory] = useState<TelemetryPoint[]>([]);
+  const [globalDeviceId, setGlobalDeviceId] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [chartLoading, setChartLoading] = useState<boolean>(false);
+
+  // IDs visibles (filtro de sondas) se gestiona en Sensores CORNEA; null = sin preferencia -> todas
+  const visibleIds = (() => {
+    try {
+      const raw = localStorage.getItem('cornea_visible_sensors');
+      return raw ? new Set(JSON.parse(raw) as string[]) : null;
+    } catch {
+      return null;
+    }
+  })() as Set<string> | null;
 
   const dateLocale = language === 'en' ? enUS : es;
 
-  // Cargar datos iniciales
+  // Cargar datos iniciales — solo catálogo y alertas; el histórico del gráfico
+  // se carga bajo demanda según el sensor visible seleccionado.
   const loadData = async () => {
     try {
       const [devsRes, alertsRes] = await Promise.all([
         apiClient.get('/devices'),
         apiClient.get('/alert-events'),
       ]);
-      setDevices(devsRes.data);
+      const devs: Device[] = devsRes.data;
+      setDevices(devs);
       setAlerts(alertsRes.data.filter((a: AlertEvent) => a.state === 'triggered'));
-
-      // Cargar historial del primer sensor para el gráfico global
-      if (devsRes.data.length > 0) {
-        const historyRes = await apiClient.get(`/devices/${devsRes.data[0].id}/measurements`, {
-          params: { interval: '15m' },
-        });
-        setGlobalHistory(historyRes.data.data);
-      }
     } catch (err) {
       console.error('Error cargando datos del dashboard:', err);
     } finally {
@@ -64,9 +72,59 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  const loadChart = async (deviceId: string) => {
+    setChartLoading(true);
+    try {
+      const from = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+      const historyRes = await apiClient.get(`/devices/${deviceId}/measurements`, {
+        params: { from, interval: 'raw' },
+      });
+      setGlobalHistory(
+        Array.isArray(historyRes.data?.data) ? historyRes.data.data : historyRes.data?.data || [],
+      );
+    } catch (err) {
+      console.error('Error cargando histórico del gráfico:', err);
+      setGlobalHistory([]);
+    } finally {
+      setChartLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadData();
   }, []);
+
+  const visibleDevices = devices.filter((d) => {
+    if (!d.enabled) return false;
+    if (visibleIds === null) return true;
+    return visibleIds.has(d.id);
+  });
+
+  const chartDevice = visibleDevices.find((d) => d.id === globalDeviceId) || visibleDevices[0] || null;
+  const chartIndex = chartDevice ? visibleDevices.findIndex((d) => d.id === chartDevice.id) : -1;
+
+  // Mantener selección coherente con el filtro de visibilidad
+  useEffect(() => {
+    if (visibleDevices.length === 0) {
+      if (globalDeviceId !== null) setGlobalDeviceId(null);
+      setGlobalHistory([]);
+      return;
+    }
+    if (!globalDeviceId || !visibleDevices.some((d) => d.id === globalDeviceId)) {
+      const firstId = visibleDevices[0].id;
+      setGlobalDeviceId(firstId);
+      loadChart(firstId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleDevices.map((d) => d.id).join(',')]);
+
+  // Cargar histórico al cambiar de sensor seleccionado (navegación)
+  useEffect(() => {
+    if (globalDeviceId && visibleDevices.some((d) => d.id === globalDeviceId)) {
+      loadChart(globalDeviceId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [globalDeviceId]);
 
   // Suscripción a eventos SSE en tiempo real
   useRealtime((event) => {
@@ -263,33 +321,73 @@ export const Dashboard: React.FC = () => {
 
       {/* Main Charts & Map Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Global Historical Telemetry Chart */}
+        {/* Global Historical Telemetry Chart — navegable solo entre sensores visibles */}
         <div className="lg:col-span-2 glass-panel p-5 rounded-2xl border">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="min-w-0">
+              <h3 className={`text-sm font-semibold truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 {t('chart_title_olivos')}
               </h3>
-              <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
-                {t('chart_subtitle_olivos')}
+              <p className={`text-[11px] truncate ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
+                {chartDevice ? `${chartDevice.name}` : t('chart_subtitle_olivos')}
               </p>
             </div>
-            {devices[0] && (
-              <Link
-                to={`/devices/${devices[0].id}`}
-                className="text-xs text-emerald-500 hover:underline flex items-center gap-1 font-medium"
-              >
-                <span>{t('full_detail')}</span>
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              </Link>
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {visibleDevices.length > 1 && chartDevice && (
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => {
+                      const prev = chartIndex <= 0 ? visibleDevices.length - 1 : chartIndex - 1;
+                      setGlobalDeviceId(visibleDevices[prev].id);
+                    }}
+                    aria-label="Anterior"
+                    className={`p-1.5 rounded-lg border transition ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-600 hover:text-slate-900'}`}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <span className={`text-[11px] font-mono min-w-[3ch] text-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                    {chartIndex + 1}/{visibleDevices.length}
+                  </span>
+                  <button
+                    onClick={() => {
+                      const next = (chartIndex + 1) % visibleDevices.length;
+                      setGlobalDeviceId(visibleDevices[next].id);
+                    }}
+                    aria-label="Siguiente"
+                    className={`p-1.5 rounded-lg border transition ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-600 hover:text-slate-900'}`}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+              {chartDevice && (
+                <Link
+                  to={`/devices/${chartDevice.id}`}
+                  className="text-xs text-emerald-500 hover:underline flex items-center gap-1 font-medium whitespace-nowrap"
+                >
+                  <span>{t('full_detail')}</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </Link>
+              )}
+            </div>
           </div>
-          <TelemetryChart
-            data={globalHistory}
-            interval="15m"
-            humidityMin={devices[0]?.humidity_min_threshold || 15}
-            humidityMax={devices[0]?.humidity_max_threshold || 85}
-          />
+          {visibleDevices.length === 0 ? (
+            <div className={`h-80 flex items-center justify-center rounded-xl border text-xs ${isDark ? 'bg-slate-900 border-slate-700 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
+              {t('no_visible_sensors')}
+            </div>
+          ) : chartLoading ? (
+            <div className="h-80 flex items-center justify-center">
+              <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : (
+            <TelemetryChart
+              data={globalHistory}
+              interval="raw"
+              humidityMin={chartDevice?.humidity_min_threshold || 15}
+              humidityMax={chartDevice?.humidity_max_threshold || 85}
+              title={chartDevice ? `${t('sensors')} — ${chartDevice.name}` : undefined}
+            />
+          )}
         </div>
 
         {/* Mini Geospatial Map */}
@@ -307,7 +405,7 @@ export const Dashboard: React.FC = () => {
               <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
           </div>
-          <SensorMap devices={devices} height="300px" />
+          <SensorMap devices={visibleDevices} height="300px" />
         </div>
       </div>
 
@@ -326,7 +424,7 @@ export const Dashboard: React.FC = () => {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {devices.map((dev) => {
+          {visibleDevices.map((dev) => {
             const humidity = dev.latest_humidity ?? 0;
             const isHigh = humidity >= dev.humidity_max_threshold;
             const isLow = humidity <= dev.humidity_min_threshold;

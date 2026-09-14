@@ -29,6 +29,9 @@ export const AlertsView: React.FC = () => {
 
   // Modal Crear Regla
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [ruleForm, setRuleForm] = useState({
     name: '',
     deviceId: '',
@@ -94,14 +97,18 @@ export const AlertsView: React.FC = () => {
     }
   };
 
-  const handleDeleteRule = async (id: string, name: string) => {
-    if (confirm(`¿Eliminar la regla "${name}"?`)) {
-      try {
-        await apiClient.delete(`/alert-rules/${id}`);
-        loadData();
-      } catch (err: any) {
-        alert(err.response?.data?.message || t('error_deleting_rule'));
-      }
+  const handleDeleteRule = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await apiClient.delete(`/alert-rules/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      loadData();
+    } catch (err: any) {
+      setDeleteError(err.response?.data?.message || t('error_deleting_rule'));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -299,7 +306,10 @@ export const AlertsView: React.FC = () => {
 
                   {user?.role === 'admin' && (
                     <button
-                      onClick={() => handleDeleteRule(rule.id, rule.name)}
+                      onClick={() => {
+                        setDeleteError(null);
+                        setDeleteTarget({ id: rule.id, name: rule.name });
+                      }}
                       className={`p-1 rounded transition ${isDark ? 'text-slate-400 hover:text-rose-400' : 'text-slate-500 hover:text-rose-600'}`}
                       title={t('delete_rule_tooltip')}
                     >
@@ -471,6 +481,48 @@ export const AlertsView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmar borrado de regla */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl space-y-4 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-500/15 text-rose-500 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{t('confirm_delete')}</h3>
+                <p className={`text-xs mt-0.5 truncate ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>"{deleteTarget.name}"</p>
+              </div>
+            </div>
+            {deleteError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs">
+                {deleteError}
+              </div>
+            )}
+            <div className={`flex items-center justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className={`px-4 py-2 rounded-xl border text-xs font-medium transition ${
+                  isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteRule}
+                disabled={deleting}
+                className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-semibold text-xs shadow-lg shadow-rose-500/20 transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{deleting ? '…' : t('delete_rule_tooltip')}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -186,7 +186,13 @@ export const DeviceDetail: React.FC = () => {
             </div>
             <p className={`text-xs font-mono mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
               DevEUI: {device.dev_eui} &bull; Sector: {device.group_name || t('general')}
+              {(device as any).place_name ? ` · ${(device as any).place_name}` : ''}
             </p>
+            {(device as any).pressure !== undefined && (device as any).pressure !== null && (
+              <p className={`text-[11px] mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                {t('pressure_label')}: {(device as any).pressure} hPa {t('pressure_ref_note')}
+              </p>
+            )}
           </div>
         </div>
 
@@ -274,6 +280,32 @@ export const DeviceDetail: React.FC = () => {
               />
             </div>
           )}
+        </div>
+
+        {/* Presión */}
+        <div className="glass-card p-3.5 rounded-2xl border">
+          <div className="flex items-center justify-between mb-1">
+            <span className={`text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
+              {t('pressure_label')}
+            </span>
+            <span className="w-4 h-4 rounded-full bg-sky-500/20 text-sky-500 flex items-center justify-center text-[10px] font-bold">
+              hPa
+            </span>
+          </div>
+          <p className="text-xl font-bold text-sky-500">
+            {device.latest_pressure !== undefined && device.latest_pressure !== null
+              ? `${device.latest_pressure} hPa`
+              : (device as any).pressure !== undefined && (device as any).pressure !== null
+              ? `${(device as any).pressure} hPa`
+              : '--'}
+          </p>
+          <p className={`text-[10px] mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+            {device.latest_pressure !== undefined && device.latest_pressure !== null
+              ? t('pressure_live')
+              : (device as any).pressure !== undefined && (device as any).pressure !== null
+              ? `${t('pressure_ref_note')} · ${(device as any).pressure} hPa`
+              : '--'}
+          </p>
         </div>
 
         {/* RSSI & SNR */}

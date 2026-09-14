@@ -59,8 +59,6 @@ async function seed() {
     console.log('✅ Usuarios seed creados (admin@example.com / admin123456)');
 
     // 3. Crear Dispositivos LoRaWAN de Demostración (Galicia: Pontevedra y Santiago de Compostela)
-    // Nomenclatura: código numérico (sufijo DevEUI) + identificativo reconocible.
-    // Umbrales agronómicos Galicia: 20 % estrés hídrico / 65 % encharcamiento.
     const sampleDevices = [
       {
         dev_eui: '0011223344556601',
@@ -69,6 +67,8 @@ async function seed() {
         group_name: 'Pontevedra - Lago de Castiñeiras',
         latitude: 42.348600,
         longitude: -8.674700,
+        place_name: 'Lago de Castiñeiras, Pontevedra (Galicia)',
+        pressure: 1012.8,
         humidity_min: 15.0,
         humidity_max: 85.0,
       },
@@ -79,6 +79,8 @@ async function seed() {
         group_name: 'Pontevedra - Lago de Castiñeiras',
         latitude: 42.349500,
         longitude: -8.673800,
+        place_name: 'Lago de Castiñeiras — Estación, Pontevedra',
+        pressure: 1012.8,
         humidity_min: 15.0,
         humidity_max: 85.0,
       },
@@ -89,6 +91,8 @@ async function seed() {
         group_name: 'Santiago - Polígono da Sionlla',
         latitude: 42.913500,
         longitude: -8.513200,
+        place_name: 'Polígono da Sionlla, Santiago de Compostela',
+        pressure: 1011.6,
         humidity_min: 15.0,
         humidity_max: 85.0,
       },
@@ -99,6 +103,8 @@ async function seed() {
         group_name: 'Santiago - Polígono da Sionlla',
         latitude: 42.914200,
         longitude: -8.512000,
+        place_name: 'Polígono da Sionlla, Santiago de Compostela',
+        pressure: 1011.6,
         humidity_min: 15.0,
         humidity_max: 85.0,
       },
@@ -109,6 +115,8 @@ async function seed() {
         group_name: 'Pontevedra - Monte Aloia (Tui)',
         latitude: 42.068200,
         longitude: -8.675000,
+        place_name: 'Parque Natural Monte Aloia, Tui (Pontevedra)',
+        pressure: 1013.4,
         humidity_min: 15.0,
         humidity_max: 85.0,
       },
@@ -118,16 +126,18 @@ async function seed() {
 
     for (const dev of sampleDevices) {
       const devRes = await client.query(`
-        INSERT INTO devices (tenant_id, dev_eui, name, description, group_name, latitude, longitude, humidity_min_threshold, humidity_max_threshold, last_seen_at)
+        INSERT INTO devices (tenant_id, dev_eui, name, description, group_name, latitude, longitude, place_name, pressure, humidity_min_threshold, humidity_max_threshold, last_seen_at)
         VALUES (
-          '${tenantId}', 
-          '${dev.dev_eui}', 
-          '${dev.name}', 
-          '${dev.description}', 
-          '${dev.group_name}', 
-          ${dev.latitude}, 
-          ${dev.longitude}, 
-          ${dev.humidity_min}, 
+          '${tenantId}',
+          '${dev.dev_eui}',
+          '${dev.name}',
+          '${dev.description}',
+          '${dev.group_name}',
+          ${dev.latitude},
+          ${dev.longitude},
+          '${(dev.place_name || '').replace(/'/g, "''")}',
+          ${dev.pressure ?? 'NULL'},
+          ${dev.humidity_min},
           ${dev.humidity_max},
           now()
         )
@@ -135,6 +145,8 @@ async function seed() {
           name = EXCLUDED.name,
           latitude = EXCLUDED.latitude,
           longitude = EXCLUDED.longitude,
+          place_name = EXCLUDED.place_name,
+          pressure = EXCLUDED.pressure,
           humidity_min_threshold = EXCLUDED.humidity_min_threshold,
           humidity_max_threshold = EXCLUDED.humidity_max_threshold,
           last_seen_at = now()

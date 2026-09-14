@@ -14,9 +14,11 @@ export class NotificationsService {
     private readonly db: DatabaseService,
   ) {
     const smtp = this.configService.get('smtp');
-    if (smtp && smtp.host) {
+    const smtpHost = (smtp?.host || '').trim();
+    // No crear transporte contra hosts de ejemplo (evita reintentos DNS ruidosos)
+    if (smtpHost && !/example\.com$/i.test(smtpHost)) {
       this.mailTransporter = nodemailer.createTransport({
-        host: smtp.host,
+        host: smtpHost,
         port: smtp.port,
         secure: smtp.port === 465,
         auth: {
@@ -24,6 +26,8 @@ export class NotificationsService {
           pass: smtp.password,
         },
       });
+    } else if (smtpHost) {
+      this.logger.debug('SMTP de ejemplo detectado, notificaciones por email desactivadas');
     }
   }
 
@@ -40,9 +44,9 @@ export class NotificationsService {
   }
 
   private async sendWebhook(alertEventId: string, rule: any, device: any, event: any) {
-    const webhookUrl = this.configService.get<string>('webhook.alertUrl');
-    if (!webhookUrl) {
-      this.logger.debug('Webhook URL no configurada, omitiendo notificación');
+    const webhookUrl = (this.configService.get<string>('webhook.alertUrl') || '').trim();
+    if (!webhookUrl || /webhook\.site\/demo/i.test(webhookUrl) || /^https?:\/\/example\.com/i.test(webhookUrl)) {
+      this.logger.debug('Webhook demo/no configurado, omitiendo notificación');
       return;
     }
 
@@ -71,8 +75,14 @@ export class NotificationsService {
       const resp = await axios.post(webhookUrl, payload, { timeout: 5000 });
       await this.logNotification(alertEventId, 'webhook', 'success', webhookUrl, `HTTP ${resp.status}`);
       this.logger.log(`Webhook enviado para evento ${alertEventId}`);
-    } catch (err) {
-      this.logger.error(`Error enviando webhook: ${err.message}`);
+    } catch (err: any) {
+      const status = err?.response?.status;
+      // 4xx del receptor demo no es fallo del sistema -> no ensucia el log como ERROR
+      if (status && status >= 400 && status < 500) {
+        this.logger.warn(`Webhook no entregado (HTTP ${status}): ${webhookUrl}`);
+      } else {
+        this.logger.warn(`Webhook no entregado: ${err.message}`);
+      }
       await this.logNotification(alertEventId, 'webhook', 'failed', webhookUrl, err.message);
     }
   }
@@ -115,8 +125,8 @@ export class NotificationsService {
       });
       await this.logNotification(alertEventId, 'email', 'success', recipients.join(', '), 'Email enviado');
       this.logger.log(`Emails de alerta enviados a ${recipients.join(', ')}`);
-    } catch (err) {
-      this.logger.error(`Error enviando email de alerta: ${err.message}`);
+    } catch (err: any) {
+      this.logger.warn(`Email no entregado: ${err.message}`);
       await this.logNotification(alertEventId, 'email', 'failed', recipients.join(', '), err.message);
     }
   }

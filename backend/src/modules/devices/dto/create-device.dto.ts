@@ -2,10 +2,13 @@ import { IsNotEmpty, IsOptional, IsString, IsNumber, IsBoolean, Matches } from '
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateDeviceDto {
-  @ApiProperty({ example: '0011223344556601', description: 'DevEUI LoRaWAN único (16 caracteres hex)' })
-  @IsNotEmpty({ message: 'El DevEUI es requerido' })
+  @ApiPropertyOptional({
+    example: '0011223344556601',
+    description: 'DevEUI LoRaWAN (16 hex). Si se deja vacío, el backend genera uno único',
+  })
+  @IsOptional()
   @Matches(/^[0-9a-fA-F]{16}$/, { message: 'El DevEUI debe tener 16 caracteres hexadecimales' })
-  devEui: string;
+  devEui?: string;
 
   @ApiProperty({ example: 'Sensor Humedad Suelo - Sector A1' })
   @IsNotEmpty({ message: 'El nombre del sensor es requerido' })
@@ -31,6 +34,16 @@ export class CreateDeviceDto {
   @IsOptional()
   @IsNumber()
   longitude?: number;
+
+  @ApiPropertyOptional({ example: 'Lago de Castiñeiras, Pontevedra' })
+  @IsOptional()
+  @IsString()
+  placeName?: string;
+
+  @ApiPropertyOptional({ example: 1013.2, description: 'Presión de referencia en el punto (hPa)' })
+  @IsOptional()
+  @IsNumber()
+  pressure?: number;
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()
@@ -58,6 +71,16 @@ export class UpdateDeviceDto {
   @IsOptional()
   @IsString()
   name?: string;
+
+  @ApiPropertyOptional({ example: 'Lago de Castiñeiras, Pontevedra' })
+  @IsOptional()
+  @IsString()
+  placeName?: string;
+
+  @ApiPropertyOptional({ example: 1013.2 })
+  @IsOptional()
+  @IsNumber()
+  pressure?: number;
 
   @ApiPropertyOptional()
   @IsOptional()

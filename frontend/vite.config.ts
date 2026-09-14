@@ -10,6 +10,10 @@ export default defineConfig({
         port: 3000,
         strictPort: false,
         proxy: {
+            '/api': {
+                target: 'http://localhost:8000',
+                changeOrigin: true,
+            },
             '/osm': {
                 target: 'https://tile.openstreetmap.org',
                 changeOrigin: true,

@@ -20,6 +20,8 @@ export interface Device {
   enabled: boolean;
   last_seen_at?: string;
   battery_threshold: number;
+  place_name?: string | null;
+  pressure?: number | null;
   humidity_min_threshold: number;
   humidity_max_threshold: number;
   latest_humidity?: number;

@@ -39,11 +39,13 @@ CREATE TABLE IF NOT EXISTS devices (
     group_name VARCHAR(100) DEFAULT 'General',
     latitude DOUBLE PRECISION,
     longitude DOUBLE PRECISION,
+    place_name VARCHAR(255),
+    pressure DOUBLE PRECISION,
     enabled BOOLEAN NOT NULL DEFAULT true,
     last_seen_at TIMESTAMPTZ,
     battery_threshold DOUBLE PRECISION DEFAULT 20.0,
-    humidity_min_threshold DOUBLE PRECISION DEFAULT 30.0,
-    humidity_max_threshold DOUBLE PRECISION DEFAULT 80.0,
+    humidity_min_threshold DOUBLE PRECISION DEFAULT 15.0,
+    humidity_max_threshold DOUBLE PRECISION DEFAULT 85.0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

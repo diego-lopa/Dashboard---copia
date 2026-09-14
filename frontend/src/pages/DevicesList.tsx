@@ -39,6 +39,29 @@ export const DevicesList: React.FC = () => {
 
   const dateLocale = language === 'en' ? enUS : es;
 
+  // Mostrar/ocultar sondas (coherente en toda la app: Dashboard, mapas).
+  // null = aún no inicializado (sin preferencia guardada) -> mostrar todas.
+  const [visibleIds, setVisibleIds] = useState<Set<string> | null>(() => {
+    try {
+      const raw = localStorage.getItem('cornea_visible_sensors');
+      return raw ? new Set(JSON.parse(raw) as string[]) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    if (visibleIds === null && devices.length > 0) {
+      setVisibleIds(new Set(devices.map((d) => d.id)));
+      return;
+    }
+    if (visibleIds !== null) {
+      localStorage.setItem('cornea_visible_sensors', JSON.stringify([...visibleIds]));
+    }
+  }, [visibleIds, devices.length]);
+
+  const effectiveVisibleIds = visibleIds ?? new Set(devices.map((d) => d.id));
+
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingDevice, setEditingDevice] = useState<Device | null>(null);
@@ -47,12 +70,16 @@ export const DevicesList: React.FC = () => {
     name: '',
     description: '',
     groupName: 'General',
+    placeName: '',
     latitude: '',
     longitude: '',
+    pressure: '',
     humidityMinThreshold: 15,
     humidityMaxThreshold: 85,
     batteryThreshold: 20,
   });
+  const [geoLoading, setGeoLoading] = useState(false);
+  const [geoNotice, setGeoNotice] = useState<string | null>(null);
 
   const loadDevices = async () => {
     try {
@@ -76,13 +103,54 @@ export const DevicesList: React.FC = () => {
       name: '',
       description: '',
       groupName: 'General',
+      placeName: '',
       latitude: '',
       longitude: '',
+      pressure: '',
       humidityMinThreshold: 15,
       humidityMaxThreshold: 85,
       batteryThreshold: 20,
     });
+    setGeoNotice(null);
     setIsModalOpen(true);
+  };
+
+  const fetchGeo = async () => {
+    const lat = parseFloat(formData.latitude);
+    const lon = parseFloat(formData.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      setGeoNotice('Introduce latitud y longitud válidas');
+      return;
+    }
+    setGeoLoading(true);
+    setGeoNotice(null);
+    try {
+      const [nominatim, meteo] = await Promise.all([
+        fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10&accept-language=es`,
+          { headers: { Accept: 'application/json' } },
+        ).then((r) => (r.ok ? r.json() : null)),
+        fetch(
+          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=pressure_msl,temperature_2m&timezone=auto`,
+        ).then((r) => (r.ok ? r.json() : null)),
+      ]);
+      let touched = false;
+      const place = nominatim?.display_name as string | undefined;
+      if (place) {
+        setFormData((prev) => ({ ...prev, placeName: place }));
+        touched = true;
+      }
+      const press = meteo?.current?.pressure_msl;
+      if (press !== undefined && press !== null) {
+        setFormData((prev) => ({ ...prev, pressure: String(press) }));
+        touched = true;
+      }
+      setGeoNotice(touched ? 'Datos rellenados desde coordenadas' : 'Sin datos para esas coordenadas');
+    } catch {
+      setGeoNotice('No se pudo consultar el servicio geográfico');
+    } finally {
+      setGeoLoading(false);
+    }
   };
 
   const openEditModal = (dev: Device) => {
@@ -92,12 +160,15 @@ export const DevicesList: React.FC = () => {
       name: dev.name,
       description: dev.description || '',
       groupName: dev.group_name || 'General',
+      placeName: (dev as any).place_name || '',
       latitude: dev.latitude !== undefined && dev.latitude !== null ? String(dev.latitude) : '',
       longitude: dev.longitude !== undefined && dev.longitude !== null ? String(dev.longitude) : '',
+      pressure: (dev as any).pressure !== undefined && (dev as any).pressure !== null ? String((dev as any).pressure) : '',
       humidityMinThreshold: dev.humidity_min_threshold || 15,
       humidityMaxThreshold: dev.humidity_max_threshold || 85,
       batteryThreshold: dev.battery_threshold || 20,
     });
+    setGeoNotice(null);
     setIsModalOpen(true);
   };
 
@@ -108,8 +179,10 @@ export const DevicesList: React.FC = () => {
         name: formData.name,
         description: formData.description,
         groupName: formData.groupName,
+        placeName: formData.placeName?.trim() || null,
         latitude: formData.latitude ? parseFloat(formData.latitude) : null,
         longitude: formData.longitude ? parseFloat(formData.longitude) : null,
+        pressure: formData.pressure ? parseFloat(formData.pressure) : null,
         humidityMinThreshold: Number(formData.humidityMinThreshold),
         humidityMaxThreshold: Number(formData.humidityMaxThreshold),
         batteryThreshold: Number(formData.batteryThreshold),
@@ -118,7 +191,8 @@ export const DevicesList: React.FC = () => {
       if (editingDevice) {
         await apiClient.patch(`/devices/${editingDevice.id}`, payload);
       } else {
-        payload.devEui = formData.devEui;
+        const trimmedEui = formData.devEui.trim();
+        if (trimmedEui) payload.devEui = trimmedEui.toUpperCase();
         await apiClient.post('/devices', payload);
       }
 
@@ -172,6 +246,52 @@ export const DevicesList: React.FC = () => {
           </button>
         )}
       </div>
+
+      {/* Mostrar/ocultar sondas — coherente en toda la app (mapas y dashboard omiten las ocultas/desactivadas) */}
+      {devices.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {devices.map((d) => {
+            const active = effectiveVisibleIds.has(d.id);
+            return (
+              <button
+                key={d.id}
+                onClick={() =>
+                  setVisibleIds((prev) => {
+                    const base = prev ?? new Set(devices.map((x) => x.id));
+                    const next = new Set(base);
+                    if (next.has(d.id)) next.delete(d.id);
+                    else next.add(d.id);
+                    return next;
+                  })
+                }
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                  active
+                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
+                    : isDark
+                    ? 'bg-slate-800 border-slate-700 text-slate-500'
+                    : 'bg-slate-100 border-slate-300 text-slate-500'
+                }`}
+              >
+                {active ? '● ' : '○ '}
+                {d.name}
+              </button>
+            );
+          })}
+          {devices.length > 0 && (
+            <button
+              onClick={() => setVisibleIds((prev) => {
+                const base = prev ?? new Set(devices.map((x) => x.id));
+                return base.size === 0 ? new Set(devices.map((x) => x.id)) : new Set<string>();
+              })}
+              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                isDark ? 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200'
+              }`}
+            >
+              {(effectiveVisibleIds.size === 0 ? t('show_all') : effectiveVisibleIds.size === devices.length ? t('hide_all') : t('show_all'))}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Filters Bar */}
       <div className="glass-panel p-4 rounded-2xl border flex flex-col md:flex-row items-center gap-4">
@@ -405,15 +525,16 @@ export const DevicesList: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="sm:col-span-1">
                   <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
-                    {t('dev_eui')} (16 hex)
+                    {t('dev_eui')} (16 hex) — {t('optional')}
                   </label>
                   <input
                     type="text"
-                    required
                     disabled={!!editingDevice}
                     value={formData.devEui}
                     onChange={(e) => setFormData({ ...formData, devEui: e.target.value })}
-                    placeholder="0011223344556601"
+                    pattern="[0-9a-fA-F]{16}"
+                    placeholder={t('dev_eui_placeholder')}
+                    title={t('dev_eui_tooltip')}
                     className={`w-full px-3 py-2 border rounded-xl text-xs font-mono focus:outline-none focus:border-emerald-500 disabled:opacity-50 ${
                       isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                     }`}
@@ -429,12 +550,27 @@ export const DevicesList: React.FC = () => {
                     required
                     value={formData.name}
                     onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                    placeholder="Sonda Humedad Sector A"
+                    placeholder="Sensor CORNEA 06"
                     className={`w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-emerald-500 ${
                       isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                     }`}
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  {t('place_name')}
+                </label>
+                <input
+                  type="text"
+                  value={formData.placeName}
+                  onChange={(e) => setFormData({ ...formData, placeName: e.target.value })}
+                  placeholder={t('place_name_placeholder')}
+                  className={`w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-emerald-500 ${
+                    isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
               </div>
 
               <div>
@@ -479,6 +615,37 @@ export const DevicesList: React.FC = () => {
                     }`}
                   />
                 </div>
+              </div>
+
+              <div className={`flex flex-wrap items-center gap-2 text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                <button
+                  type="button"
+                  onClick={fetchGeo}
+                  disabled={geoLoading || !formData.latitude || !formData.longitude}
+                  className={`px-3 py-1.5 rounded-xl border font-medium transition disabled:opacity-50 ${
+                    isDark ? 'bg-slate-800 border-slate-700 hover:text-white' : 'bg-slate-100 border-slate-300 hover:bg-slate-200'
+                  }`}
+                >
+                  {geoLoading ? t('fetching') : t('fetch_from_coords')}
+                </button>
+                {geoNotice && <span className="text-[11px]">{geoNotice}</span>}
+              </div>
+
+              <div>
+                <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                  {t('pressure_label')} (hPa)
+                </label>
+                <input
+                  type="number"
+                  step="any"
+                  value={formData.pressure}
+                  onChange={(e) => setFormData({ ...formData, pressure: e.target.value })}
+                  placeholder="1013.2"
+                  className={`w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-emerald-500 ${
+                    isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                  }`}
+                />
+                <p className={`text-[10px] mt-1 ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{t('pressure_help')}</p>
               </div>
 
               <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
