@@ -9,5 +9,13 @@ export default defineConfig({
         host: '127.0.0.1', // localhost IPv4 para evitar problemas con Brave/proxy en Windows
         port: 3000,
         strictPort: false,
+        proxy: {
+            '/osm': {
+                target: 'https://tile.openstreetmap.org',
+                changeOrigin: true,
+                rewrite: (p) => p.replace(/^\/osm/, ''),
+                headers: { 'User-Agent': 'CORNEA/1.0 (+https://github.com/neutroninsights/cornea)' },
+            },
+        },
     },
 })

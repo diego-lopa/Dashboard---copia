@@ -66,7 +66,7 @@ export const SensorMap: React.FC<SensorMapProps> = ({ devices, height = '300px' 
       <MapContainer center={center} zoom={6} style={{ height: '100%', width: '100%' }} scrollWheelZoom={true}>
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          url="/osm/{z}/{x}/{y}.png"
         />
         {withCoords.map((d) => (
           <CircleMarker
