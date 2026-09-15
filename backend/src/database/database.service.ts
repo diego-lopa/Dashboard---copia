@@ -26,8 +26,22 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       const client = await this.pool.connect();
       this.logger.log('Conexión exitosa con PostgreSQL + TimescaleDB');
       client.release();
+      // Auto-reparación de esquema (migración 007): volúmenes creados antes
+      // de la columna `devices.visible` quedan alineados sin psql manual.
+      await this.ensureVisibleColumn();
     } catch (err) {
       this.logger.error(`Error conectando con la base de datos: ${err.message}`);
+    }
+  }
+
+  /** Idempotente: garantiza `devices.visible` aunque el volumen sea anterior. */
+  private async ensureVisibleColumn(): Promise<void> {
+    try {
+      await this.pool.query(
+        'ALTER TABLE devices ADD COLUMN IF NOT EXISTS visible BOOLEAN NOT NULL DEFAULT true',
+      );
+    } catch (err) {
+      this.logger.warn(`No se pudo asegurar devices.visible: ${err.message}`);
     }
   }
 

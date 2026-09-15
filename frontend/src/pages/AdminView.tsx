@@ -72,6 +72,9 @@ export const AdminView: React.FC = () => {
   const [userForm, setUserForm] = useState({ email: '', password: '', role: 'operator', enabled: true });
   const [savingUser, setSavingUser] = useState(false);
   const [userFormError, setUserFormError] = useState<string | null>(null);
+  const [deleteUserTarget, setDeleteUserTarget] = useState<PlatformUser | null>(null);
+  const [deletingUser, setDeletingUser] = useState(false);
+  const [deleteUserError, setDeleteUserError] = useState<string | null>(null);
 
   // ── Estado de servicios ───────────────────────────────────
   const [apiStatus, setApiStatus] = useState<SvcState>('checking');
@@ -87,8 +90,7 @@ export const AdminView: React.FC = () => {
   const [devices, setDevices] = useState<Device[]>([]);
   const [devEui, setDevEui] = useState('0011223344556601');
   const [format, setFormat] = useState<'chirpstack' | 'simple'>('chirpstack');
-  const [humidity, setHumidity] = useState('62.4');
-  const [neutrons, setNeutrons] = useState('');
+  const [neutrons, setNeutrons] = useState('62');
   const [temperature, setTemperature] = useState('23.1');
   const [battery, setBattery] = useState('3.82');
   const [pressure, setPressure] = useState('1013.2');
@@ -163,29 +165,34 @@ export const AdminView: React.FC = () => {
     }
   };
 
-  const handleDeleteUser = async (u: PlatformUser) => {
-    if (u.email === currentUser?.email) {
-      setNotice(t('cannot_delete_self'));
+  const handleDeleteUser = async () => {
+    if (!deleteUserTarget) return;
+    if (deleteUserTarget.email === currentUser?.email) {
+      setDeleteUserError(t('cannot_delete_self'));
       return;
     }
-    if (!confirm(`${t('confirm_delete_user')} "${u.email}"?`)) return;
+    setDeletingUser(true);
+    setDeleteUserError(null);
     try {
-      await apiClient.delete(`/users/${u.id}`);
+      await apiClient.delete(`/users/${deleteUserTarget.id}`);
+      setDeleteUserTarget(null);
       setNotice(t('user_deleted'));
       await loadUsers();
     } catch (err: any) {
-      setNotice(err?.response?.data?.message || t('test_error'));
+      setDeleteUserError(err?.response?.data?.message || t('test_error'));
+    } finally {
+      setDeletingUser(false);
     }
   };
 
   const neutronValue = neutrons.trim() === '' ? undefined : num(neutrons, 0);
 
   const buildPayload = () => {
+    // El tester siempre envía neutrones (N_raw); la humedad la calcula el
+    // backend con el modelo Geant4 (corrección barométrica + EMA).
     if (format === 'simple') {
       return {
         devEui: devEui.trim().toUpperCase(),
-        humidity: num(humidity, 0),
-        // Si se informa N_raw, el backend calcula θ con el modelo Geant4
         ...(neutronValue !== undefined ? { neutron_counts: neutronValue } : {}),
         temperature: num(temperature, 0),
         battery: num(battery, 0),
@@ -210,8 +217,6 @@ export const AdminView: React.FC = () => {
       fCnt: Math.floor(Math.random() * 60000),
       fPort: 2,
       object: {
-        humidity: num(humidity, 0),
-        // Si se informa N_raw, el backend calcula θ con el modelo Geant4
         ...(neutronValue !== undefined ? { neutron_counts: neutronValue } : {}),
         temperature: num(temperature, 0),
         battery: num(battery, 0),
@@ -249,6 +254,10 @@ export const AdminView: React.FC = () => {
     setResult(null);
     if (!apiKey.trim()) {
       setResult({ ok: false, message: t('api_key_required') });
+      return;
+    }
+    if (neutrons.trim() === '' || Number.isNaN(Number(neutrons))) {
+      setResult({ ok: false, message: `${t('neutron_label')} (${t('neutron_unit')}) ${t('required_field')}` });
       return;
     }
     setSending(true);
@@ -547,7 +556,10 @@ export const AdminView: React.FC = () => {
                             <Edit2 className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => handleDeleteUser(u)}
+                            onClick={() => {
+                              setDeleteUserError(null);
+                              setDeleteUserTarget(u);
+                            }}
                             title={isSelf ? t('cannot_delete_self') : t('delete_user')}
                             disabled={isSelf}
                             className={`p-1.5 rounded-lg border transition ${
@@ -625,8 +637,16 @@ export const AdminView: React.FC = () => {
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               <div>
-                <label className={labelCls(isDark)}>{t('soil_moisture')} (%)</label>
-                <input type="number" step="any" value={humidity} onChange={(e) => setHumidity(e.target.value)} className={inputCls(isDark)} />
+                <label className={labelCls(isDark)}>{t('neutron_label')} ({t('neutron_unit')})</label>
+                <input
+                  type="number"
+                  step="any"
+                  required
+                  value={neutrons}
+                  onChange={(e) => setNeutrons(e.target.value)}
+                  placeholder="62"
+                  className={inputCls(isDark)}
+                />
               </div>
               <div>
                 <label className={labelCls(isDark)}>{t('temperature')} (°C)</label>
@@ -635,17 +655,6 @@ export const AdminView: React.FC = () => {
               <div>
                 <label className={labelCls(isDark)}>{t('battery')} (V)</label>
                 <input type="number" step="any" value={battery} onChange={(e) => setBattery(e.target.value)} className={inputCls(isDark)} />
-              </div>
-              <div>
-                <label className={labelCls(isDark)}>{t('neutron_label')} ({t('neutron_unit')})</label>
-                <input
-                  type="number"
-                  step="any"
-                  value={neutrons}
-                  onChange={(e) => setNeutrons(e.target.value)}
-                  placeholder="—"
-                  className={inputCls(isDark)}
-                />
               </div>
               <div>
                 <label className={labelCls(isDark)}>{t('pressure_label')} (hPa)</label>
@@ -801,6 +810,48 @@ export const AdminView: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmar borrado de usuario */}
+      {deleteUserTarget && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl space-y-4 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-500/15 text-rose-500 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{t('confirm_delete_user')}</h3>
+                <p className={`text-xs mt-0.5 truncate ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>"{deleteUserTarget.email}"</p>
+              </div>
+            </div>
+            {deleteUserError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs">
+                {deleteUserError}
+              </div>
+            )}
+            <div className={`flex items-center justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <button
+                type="button"
+                onClick={() => setDeleteUserTarget(null)}
+                className={`px-4 py-2 rounded-xl border text-xs font-medium transition ${
+                  isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleDeleteUser}
+                disabled={deletingUser}
+                className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-semibold text-xs shadow-lg shadow-rose-500/20 transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{deletingUser ? '…' : t('delete_user')}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

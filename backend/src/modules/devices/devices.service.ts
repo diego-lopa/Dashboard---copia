@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../../database/database.service';
-import { CreateDeviceDto, UpdateDeviceDto } from './dto/create-device.dto';
+import { CreateDeviceDto, UpdateDeviceDto, UpdateDeviceVisibilityDto } from './dto/create-device.dto';
 import { DeviceEntity } from '../../shared/types';
 
 @Injectable()
@@ -144,6 +144,8 @@ export class DevicesService {
       devEui: d.dev_eui,
       name: d.name,
       groupName: d.group_name,
+      enabled: d.enabled,
+      visible: d.visible,
       status: d.status,
       lastSeenAt: d.last_seen_at,
       humidity: d.latest_humidity,
@@ -264,6 +266,17 @@ export class DevicesService {
       RETURNING *;
     `;
     const res = await this.db.query(query, values);
+    return res.rows[0];
+  }
+
+  /** Visibilidad display-only (solo admin): no toca ingesta ni umbrales. */
+  async updateVisibility(id: string, tenantId: string, dto: UpdateDeviceVisibilityDto) {
+    await this.findOne(id, tenantId);
+    const res = await this.db.query(
+      `UPDATE devices SET visible = $3, updated_at = now()
+       WHERE id = $1 AND tenant_id = $2 RETURNING *;`,
+      [id, tenantId, dto.visible],
+    );
     return res.rows[0];
   }
 

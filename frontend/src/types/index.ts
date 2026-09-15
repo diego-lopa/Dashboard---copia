@@ -18,6 +18,8 @@ export interface Device {
   latitude?: number;
   longitude?: number;
   enabled: boolean;
+  /** Visible en Dashboard y mapas (display-only, lo gestiona el admin en servidor). */
+  visible: boolean;
   last_seen_at?: string;
   battery_threshold: number;
   place_name?: string | null;

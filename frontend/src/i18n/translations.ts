@@ -245,6 +245,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: 'Ocultar todas',
         pressure_live: 'Medida en vivo',
         no_visible_sensors: 'No hay sensores visibles. Actívalos en Sensores CORNEA.',
+        required_field: 'es obligatorio',
     },
     en: {
         system_name: 'CORNEA',
@@ -479,6 +480,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: 'Hide all',
         pressure_live: 'Live reading',
         no_visible_sensors: 'No visible sensors. Enable them in CORNEA Sensors.',
+        required_field: 'is required',
     },
     gl: {
         system_name: 'CORNEA',
@@ -705,6 +707,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: 'Agochar todas',
         pressure_live: 'Medida en vivo',
         no_visible_sensors: 'Non hai sensores visibles. Actívaos en Sensores CORNEA.',
+        required_field: 'é obrigatorio',
     },
     zh: {
         system_name: 'CORNEA',
@@ -931,6 +934,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: '全部隐藏',
         pressure_live: '实时读数',
         no_visible_sensors: '没有可见传感器。请在 CORNEA 传感器中启用。',
+        required_field: '为必填项',
     },
     hi: {
         system_name: 'CORNEA',
@@ -1153,6 +1157,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: 'सभी छिपाएँ',
         pressure_live: 'लाइव रीडिंग',
         no_visible_sensors: 'कोई दृश्य सेंसर नहीं। CORNEA सेंसर में सक्षम करें।',
+        required_field: 'आवश्यक है',
     },
     fr: {
         system_name: 'CORNEA',
@@ -1375,6 +1380,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: 'Tout masquer',
         pressure_live: 'Mesure en direct',
         no_visible_sensors: 'Aucun capteur visible. Activez-les dans Capteurs CORNEA.',
+        required_field: 'est requis',
     },
     ar: {
         system_name: 'CORNEA',
@@ -1597,6 +1603,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: 'إخفاء الكل',
         pressure_live: 'قراءة مباشرة',
         no_visible_sensors: 'لا توجد حساسات مرئية. فعّلها في حساسات CORNEA.',
+        required_field: 'مطلوب',
     },
     pt: {
         system_name: 'CORNEA',
@@ -1819,6 +1826,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: 'Ocultar todas',
         pressure_live: 'Leitura ao vivo',
         no_visible_sensors: 'Nenhum sensor visível. Ative-os em Sensores CORNEA.',
+        required_field: 'é obrigatório',
     },
     de: {
         system_name: 'CORNEA',
@@ -2041,6 +2049,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: 'Alle ausblenden',
         pressure_live: 'Live-Messung',
         no_visible_sensors: 'Keine sichtbaren Sensoren. In CORNEA-Sensoren aktivieren.',
+        required_field: 'ist erforderlich',
     },
     ru: {
         system_name: 'CORNEA',
@@ -2263,6 +2272,7 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: 'Скрыть все',
         pressure_live: 'Живое показание',
         no_visible_sensors: 'Нет видимых датчиков. Включите их в разделе Датчики CORNEA.',
+        required_field: 'обязательно',
     },
     it: {
         system_name: 'CORNEA',
@@ -2485,5 +2495,6 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
         hide_all: 'Nascondi tutte',
         pressure_live: 'Lettura live',
         no_visible_sensors: 'Nessun sensore visibile. Attivali in Sensori CORNEA.',
+        required_field: 'è obbligatorio',
     },
 };

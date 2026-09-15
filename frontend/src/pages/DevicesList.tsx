@@ -39,28 +39,30 @@ export const DevicesList: React.FC = () => {
 
   const dateLocale = language === 'en' ? enUS : es;
 
-  // Mostrar/ocultar sondas (coherente en toda la app: Dashboard, mapas).
-  // null = aún no inicializado (sin preferencia guardada) -> mostrar todas.
-  const [visibleIds, setVisibleIds] = useState<Set<string> | null>(() => {
+  // Mostrar/ocultar sondas (solo admin): preferencia en servidor (`visible`),
+  // coherente en toda la app y para todos los usuarios. Sin localStorage:
+  // cada cambio se confirma contra la API y el estado refleja la respuesta.
+  const [visibilityBusy, setVisibilityBusy] = useState(false);
+  const [visibilityError, setVisibilityError] = useState<string | null>(null);
+
+  const effectiveVisibleIds = new Set(devices.filter((d) => d.visible !== false).map((d) => d.id));
+
+  const applyVisibility = async (targets: Device[], visible: boolean) => {
+    if (targets.length === 0) return;
+    setVisibilityBusy(true);
+    setVisibilityError(null);
     try {
-      const raw = localStorage.getItem('cornea_visible_sensors');
-      return raw ? new Set(JSON.parse(raw) as string[]) : null;
-    } catch {
-      return null;
+      const updated = await Promise.all(
+        targets.map((d) => apiClient.patch(`/devices/${d.id}/visibility`, { visible })),
+      );
+      const byId = new Map(updated.map((r) => [(r.data as Device).id, r.data as Device]));
+      setDevices((prev) => prev.map((d) => byId.get(d.id) ?? d));
+    } catch (err: any) {
+      setVisibilityError(err?.response?.data?.message || t('test_error'));
+    } finally {
+      setVisibilityBusy(false);
     }
-  });
-
-  useEffect(() => {
-    if (visibleIds === null && devices.length > 0) {
-      setVisibleIds(new Set(devices.map((d) => d.id)));
-      return;
-    }
-    if (visibleIds !== null) {
-      localStorage.setItem('cornea_visible_sensors', JSON.stringify([...visibleIds]));
-    }
-  }, [visibleIds, devices.length]);
-
-  const effectiveVisibleIds = visibleIds ?? new Set(devices.map((d) => d.id));
+  };
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -80,6 +82,10 @@ export const DevicesList: React.FC = () => {
   });
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoNotice, setGeoNotice] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const loadDevices = async () => {
     try {
@@ -174,6 +180,7 @@ export const DevicesList: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError(null);
     try {
       const payload: any = {
         name: formData.name,
@@ -199,18 +206,22 @@ export const DevicesList: React.FC = () => {
       setIsModalOpen(false);
       loadDevices();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Error guardando dispositivo');
+      setFormError(err.response?.data?.message || 'Error guardando dispositivo');
     }
   };
 
-  const handleDelete = async (id: string, name: string) => {
-    if (confirm(`${t('confirm_delete')} "${name}"?`)) {
-      try {
-        await apiClient.delete(`/devices/${id}`);
-        loadDevices();
-      } catch (err: any) {
-        alert(err.response?.data?.message || 'Error eliminando dispositivo');
-      }
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await apiClient.delete(`/devices/${deleteTarget.id}`);
+      setDeleteTarget(null);
+      loadDevices();
+    } catch (err: any) {
+      setDeleteError(err.response?.data?.message || 'Error eliminando dispositivo');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -247,24 +258,19 @@ export const DevicesList: React.FC = () => {
         )}
       </div>
 
-      {/* Mostrar/ocultar sondas — coherente en toda la app (mapas y dashboard omiten las ocultas/desactivadas) */}
-      {devices.length > 0 && (
+      {/* Mostrar/ocultar sondas — solo admin. Persistido en servidor, coherente
+          en toda la app y para todos los usuarios (mapas y dashboard omiten
+          las ocultas/desactivadas) */}
+      {user?.role === 'admin' && devices.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           {devices.map((d) => {
             const active = effectiveVisibleIds.has(d.id);
             return (
               <button
                 key={d.id}
-                onClick={() =>
-                  setVisibleIds((prev) => {
-                    const base = prev ?? new Set(devices.map((x) => x.id));
-                    const next = new Set(base);
-                    if (next.has(d.id)) next.delete(d.id);
-                    else next.add(d.id);
-                    return next;
-                  })
-                }
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
+                disabled={visibilityBusy}
+                onClick={() => applyVisibility([d], !active)}
+                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition disabled:opacity-50 ${
                   active
                     ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
                     : isDark
@@ -277,18 +283,21 @@ export const DevicesList: React.FC = () => {
               </button>
             );
           })}
-          {devices.length > 0 && (
-            <button
-              onClick={() => setVisibleIds((prev) => {
-                const base = prev ?? new Set(devices.map((x) => x.id));
-                return base.size === 0 ? new Set(devices.map((x) => x.id)) : new Set<string>();
-              })}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition ${
-                isDark ? 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200'
-              }`}
-            >
-              {(effectiveVisibleIds.size === 0 ? t('show_all') : effectiveVisibleIds.size === devices.length ? t('hide_all') : t('show_all'))}
-            </button>
+          <button
+            disabled={visibilityBusy}
+            onClick={() =>
+              effectiveVisibleIds.size === 0
+                ? applyVisibility(devices, true)
+                : applyVisibility(devices, false)
+            }
+            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition disabled:opacity-50 ${
+              isDark ? 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            {(effectiveVisibleIds.size === 0 ? t('show_all') : effectiveVisibleIds.size === devices.length ? t('hide_all') : t('show_all'))}
+          </button>
+          {visibilityError && (
+            <span className="text-xs text-rose-500">{visibilityError}</span>
           )}
         </div>
       )}
@@ -484,7 +493,10 @@ export const DevicesList: React.FC = () => {
 
                         {user?.role === 'admin' && (
                           <button
-                            onClick={() => handleDelete(dev.id, dev.name)}
+                            onClick={() => {
+                              setDeleteError(null);
+                              setDeleteTarget({ id: dev.id, name: dev.name });
+                            }}
                             className={`p-1.5 rounded-lg border transition ${
                               isDark
                                 ? 'bg-slate-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border-slate-700'
@@ -520,6 +532,12 @@ export const DevicesList: React.FC = () => {
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {formError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs">
+                {formError}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -700,6 +718,48 @@ export const DevicesList: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmar borrado de sensor */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl space-y-4 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-500/15 text-rose-500 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{t('confirm_delete')}</h3>
+                <p className={`text-xs mt-0.5 truncate ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>"{deleteTarget.name}"</p>
+              </div>
+            </div>
+            {deleteError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs">
+                {deleteError}
+              </div>
+            )}
+            <div className={`flex items-center justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <button
+                type="button"
+                onClick={() => setDeleteTarget(null)}
+                className={`px-4 py-2 rounded-xl border text-xs font-medium transition ${
+                  isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={handleDelete}
+                disabled={deleting}
+                className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-semibold text-xs shadow-lg shadow-rose-500/20 transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{deleting ? '…' : t('delete_sensor')}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

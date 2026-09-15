@@ -22,17 +22,9 @@ export const SensorMap: React.FC<SensorMapProps> = ({ devices, height = '300px' 
   const { t } = useLanguage();
   const isDark = theme === 'dark';
 
-  // Ocultar sondas desactivadas y las desmarcadas en Sensores CORNEA
-  const visibleDevices = (() => {
-    try {
-      const raw = localStorage.getItem('cornea_visible_sensors');
-      if (raw === null) return devices.filter((d) => d.enabled);
-      const hidden = new Set(JSON.parse(raw) as string[]);
-      return devices.filter((d) => d.enabled && hidden.has(d.id));
-    } catch {
-      return devices.filter((d) => d.enabled);
-    }
-  })();
+  // Las sondas llegan ya filtradas (activas + visibles según servidor);
+  // aquí solo se refuerza por seguridad ante datos parciales.
+  const visibleDevices = devices.filter((d) => d.enabled !== false && d.visible !== false);
 
   const withCoords = useMemo(
     () =>

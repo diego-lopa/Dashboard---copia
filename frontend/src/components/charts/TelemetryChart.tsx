@@ -23,7 +23,6 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   const { t } = useLanguage();
   const isDark = theme === 'dark';
 
-  const chartTitle = title || t('chart_title_olivos');
   const humidityLabel = `${t('soil_moisture')} (%)`;
   const temperatureLabel = `${t('temperature')} (°C)`;
   const neutronLabel = t('neutron_label');
@@ -44,14 +43,18 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   const temperatures = data.map((d) => toPoint(d, d.avg_temperature ?? d.temperature)).filter(isValidPoint);
   const neutrons = data.map((d) => toPoint(d, d.avg_neutron_counts ?? d.neutron_counts)).filter(isValidPoint);
 
-  const option = {
+  const option: any = {
     backgroundColor: 'transparent',
-    title: {
-      text: chartTitle,
-      textStyle: { color: isDark ? '#F8FAFC' : '#0F172A', fontSize: 13, fontWeight: '600' },
-      left: '0',
-      top: '0',
-    },
+    ...(title
+      ? {
+          title: {
+            text: title,
+            textStyle: { color: isDark ? '#F8FAFC' : '#0F172A', fontSize: 13, fontWeight: '600' },
+            left: '0',
+            top: '0',
+          },
+        }
+      : {}),
     tooltip: {
       trigger: 'axis',
       backgroundColor: isDark ? '#1E293B' : '#FFFFFF',
@@ -91,7 +94,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
       left: '3%',
       right: '4%',
       bottom: '24%',
-      top: '16%',
+      top: title ? '16%' : '8%',
       containLabel: true,
     },
     dataZoom: [
@@ -132,6 +135,9 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
         max: 100,
       },
       {
+        // Escala fija 0-120: N_raw simulado oscila ~7-110 (θ 89%→12%).
+        // Con autoescala el espejo N↔θ se aplana y no se aprecia que a
+        // más neutrones corresponde menos humedad (modelo Geant4).
         type: 'value',
         name: `N (${t('neutron_unit')})`,
         nameTextStyle: { color: isDark ? '#94A3B8' : '#334155', fontSize: 11 },
@@ -139,6 +145,8 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
         axisLine: { lineStyle: { color: isDark ? '#334155' : '#CBD5E1' } },
         axisLabel: { color: isDark ? '#94A3B8' : '#334155', fontSize: 11 },
         splitLine: { show: false },
+        min: 0,
+        max: 120,
       },
     ],
     series: [

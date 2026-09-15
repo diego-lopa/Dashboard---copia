@@ -66,6 +66,12 @@ export class CreateDeviceDto {
   humidityMaxThreshold?: number;
 }
 
+export class UpdateDeviceVisibilityDto {
+  @ApiPropertyOptional({ default: true, description: 'Mostrar la sonda en Dashboard y mapas (solo admin)' })
+  @IsBoolean()
+  visible: boolean;
+}
+
 export class UpdateDeviceDto {
   @ApiPropertyOptional()
   @IsOptional()

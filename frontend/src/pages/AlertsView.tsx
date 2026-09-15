@@ -32,6 +32,8 @@ export const AlertsView: React.FC = () => {
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [ackError, setAckError] = useState<string | null>(null);
   const [ruleForm, setRuleForm] = useState({
     name: '',
     deviceId: '',
@@ -66,16 +68,18 @@ export const AlertsView: React.FC = () => {
   }, []);
 
   const handleAcknowledge = async (eventId: string) => {
+    setAckError(null);
     try {
       await apiClient.post(`/alert-events/${eventId}/acknowledge`);
       loadData();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Error reconociendo alerta');
+      setAckError(err.response?.data?.message || 'Error reconociendo alerta');
     }
   };
 
   const handleCreateRule = async (e: React.FormEvent) => {
     e.preventDefault();
+    setCreateError(null);
     try {
       const payload: any = {
         name: ruleForm.name,
@@ -93,7 +97,7 @@ export const AlertsView: React.FC = () => {
       setIsModalOpen(false);
       loadData();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Error creando regla');
+      setCreateError(err.response?.data?.message || 'Error creando regla');
     }
   };
 
@@ -154,6 +158,11 @@ export const AlertsView: React.FC = () => {
       {/* Tab: Incidentes / Alert Events */}
       {activeTab === 'events' && (
         <div className="glass-panel rounded-2xl border overflow-hidden shadow-xl">
+          {ackError && (
+            <div className="mx-4 mt-4 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs">
+              {ackError}
+            </div>
+          )}
           <div className={`p-4 border-b flex items-center justify-between ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
             <h3 className={`font-semibold text-xs uppercase tracking-wider ${isDark ? 'text-white' : 'text-slate-900'}`}>
               {t('incidents_history')}
@@ -333,6 +342,12 @@ export const AlertsView: React.FC = () => {
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {createError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs">
+                {createError}
+              </div>
+            )}
 
             <form onSubmit={handleCreateRule} className="space-y-4">
               <div>

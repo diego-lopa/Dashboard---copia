@@ -11,7 +11,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
 import { DevicesService } from './devices.service';
-import { CreateDeviceDto, UpdateDeviceDto } from './dto/create-device.dto';
+import { CreateDeviceDto, UpdateDeviceDto, UpdateDeviceVisibilityDto } from './dto/create-device.dto';
 import { JwtAuthGuard } from '../../shared/guards/jwt-auth.guard';
 import { RolesGuard } from '../../shared/guards/roles.guard';
 import { Roles } from '../../shared/decorators/roles.decorator';
@@ -59,6 +59,17 @@ export class DevicesController {
     @Body() dto: UpdateDeviceDto,
   ) {
     return this.devicesService.update(id, user.tenantId, dto);
+  }
+
+  @Patch(':id/visibility')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Mostrar u ocultar el dispositivo en Dashboard y mapas (Solo Admin)' })
+  async updateVisibility(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: AuthenticatedUser,
+    @Body() dto: UpdateDeviceVisibilityDto,
+  ) {
+    return this.devicesService.updateVisibility(id, user.tenantId, dto);
   }
 
   @Delete(':id')

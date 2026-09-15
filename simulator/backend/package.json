@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "lorawan-sensor-simulator": "file:.."
+  }
+}

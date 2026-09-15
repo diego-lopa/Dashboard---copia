@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS devices (
     place_name VARCHAR(255),
     pressure DOUBLE PRECISION,
     enabled BOOLEAN NOT NULL DEFAULT true,
+    visible BOOLEAN NOT NULL DEFAULT true,
     last_seen_at TIMESTAMPTZ,
     battery_threshold DOUBLE PRECISION DEFAULT 20.0,
     humidity_min_threshold DOUBLE PRECISION DEFAULT 15.0,

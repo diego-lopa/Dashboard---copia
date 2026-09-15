@@ -42,21 +42,13 @@ export const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [chartLoading, setChartLoading] = useState<boolean>(false);
 
-  // IDs visibles (filtro de sondas) se gestiona en Sensores CORNEA; null = sin preferencia -> todas
-  const visibleIds = (() => {
-    try {
-      const raw = localStorage.getItem('cornea_visible_sensors');
-      return raw ? new Set(JSON.parse(raw) as string[]) : null;
-    } catch {
-      return null;
-    }
-  })() as Set<string> | null;
-
   const dateLocale = language === 'en' ? enUS : es;
 
-  // Cargar datos iniciales — solo catálogo y alertas; el histórico del gráfico
-  // se carga bajo demanda según el sensor visible seleccionado.
-  const loadData = async () => {
+  // Cargar datos — solo catálogo y alertas; el histórico del gráfico se carga
+  // bajo demanda según el sensor visible seleccionado. `silent` evita el
+  // spinner en los refrescos periódicos (el panel siempre muestra datos
+  // exactos del servidor, sin depender de localStorage).
+  const loadData = async (silent = false) => {
     try {
       const [devsRes, alertsRes] = await Promise.all([
         apiClient.get('/devices'),
@@ -64,11 +56,19 @@ export const Dashboard: React.FC = () => {
       ]);
       const devs: Device[] = devsRes.data;
       setDevices(devs);
-      setAlerts(alertsRes.data.filter((a: AlertEvent) => a.state === 'triggered'));
+      // Solo incidentes de sensores activos: los desactivados no existen en el panel
+      const enabledIds = new Set(devs.filter((d: Device) => d.enabled !== false).map((d: Device) => d.id));
+      setAlerts(
+        alertsRes.data.filter((a: AlertEvent) => {
+          if (a.state !== 'triggered') return false;
+          const aid = (a as any).device_id ?? (a as any).deviceId;
+          return aid ? enabledIds.has(aid) : true;
+        }),
+      );
     } catch (err) {
       console.error('Error cargando datos del dashboard:', err);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -90,15 +90,19 @@ export const Dashboard: React.FC = () => {
     }
   };
 
+  // Carga inicial + refresco periódico (60 s) como respaldo del SSE:
+  // cada usuario ve siempre el estado exacto del servidor.
   useEffect(() => {
     loadData();
+    const timer = setInterval(() => loadData(true), 60000);
+    return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const visibleDevices = devices.filter((d) => {
-    if (!d.enabled) return false;
-    if (visibleIds === null) return true;
-    return visibleIds.has(d.id);
-  });
+  // Sensores mostrados = activos (enabled) + visibles (flag `visible` que el
+  // admin gestiona en Sensores CORNEA, persistido en servidor). Todo el panel
+  // (KPIs, gráfica, mapa, tarjetas, incidentes) se calcula sobre este conjunto.
+  const visibleDevices = devices.filter((d) => d.enabled !== false && d.visible !== false);
 
   const chartDevice = visibleDevices.find((d) => d.id === globalDeviceId) || visibleDevices[0] || null;
   const chartIndex = chartDevice ? visibleDevices.findIndex((d) => d.id === chartDevice.id) : -1;
@@ -173,14 +177,23 @@ export const Dashboard: React.FC = () => {
     }
   };
 
-  // KPIs
-  const totalSensors = devices.length;
-  const onlineSensors = devices.filter((d) => d.status === 'online').length;
-  const warningSensors = devices.filter((d) => d.status === 'warning' || d.status === 'critical').length;
-  const lowBatterySensors = devices.filter((d) =>
+  // KPIs — solo sensores mostrados: ocultar un sensor lo saca del panel.
+  // Online no excluyente: todo mostrado no-offline cuenta como online aunque
+  // a la vez esté en alerta o batería baja. Coherencia: total = online + offline.
+  const totalSensors = visibleDevices.length;
+  const onlineSensors = visibleDevices.filter((d) => d.status !== 'offline').length;
+  const warningSensors = visibleDevices.filter((d) => d.status === 'warning' || d.status === 'critical').length;
+  const lowBatterySensors = visibleDevices.filter((d) =>
     isLowBattery(d.latest_battery, d.battery_threshold),
   ).length;
-  const offlineSensors = devices.filter((d) => d.status === 'offline').length;
+  const offlineSensors = visibleDevices.filter((d) => d.status === 'offline').length;
+  // Banner de incidentes: solo de sensores mostrados (por si entra un SSE
+  // tardío de un sensor recién oculto/desactivado).
+  const shownIds = new Set(visibleDevices.map((d) => d.id));
+  const activeAlerts = alerts.filter((a) => {
+    const aid = (a as any).device_id ?? (a as any).deviceId;
+    return aid ? shownIds.has(aid) : true;
+  });
 
   if (loading) {
     return (
@@ -273,19 +286,19 @@ export const Dashboard: React.FC = () => {
       </div>
 
       {/* Active Alerts Banner if any */}
-      {alerts.length > 0 && (
+      {activeAlerts.length > 0 && (
         <div className={`glass-panel p-5 rounded-2xl border space-y-3 ${isDark ? 'border-rose-500/30 bg-rose-950/10' : 'border-rose-300 bg-rose-50/80'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-2 text-rose-500 font-semibold text-sm">
               <ShieldAlert className="w-5 h-5 animate-pulse" />
-              <span>{t('active_incidents')} ({alerts.length})</span>
+              <span>{t('active_incidents')} ({activeAlerts.length})</span>
             </div>
             <Link to="/alerts" className="text-xs text-rose-500 hover:underline">
               {t('view_all_rules')} →
             </Link>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {alerts.slice(0, 4).map((al) => (
+            {activeAlerts.slice(0, 4).map((al) => (
               <div
                 key={al.id}
                 className={`p-3.5 rounded-xl border flex items-center justify-between ${
@@ -328,8 +341,10 @@ export const Dashboard: React.FC = () => {
               <h3 className={`text-sm font-semibold truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 {t('chart_title_olivos')}
               </h3>
-              <p className={`text-[11px] truncate ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
-                {chartDevice ? `${chartDevice.name}` : t('chart_subtitle_olivos')}
+              <p className={`text-[11px] truncate select-text ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
+                {chartDevice
+                  ? `${chartDevice.name} - ${(chartDevice as any).place_name || chartDevice.group_name || ''}`.trim()
+                  : t('chart_subtitle_olivos')}
               </p>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -385,7 +400,6 @@ export const Dashboard: React.FC = () => {
               interval="raw"
               humidityMin={chartDevice?.humidity_min_threshold || 15}
               humidityMax={chartDevice?.humidity_max_threshold || 85}
-              title={chartDevice ? `${t('sensors')} — ${chartDevice.name}` : undefined}
             />
           )}
         </div>
