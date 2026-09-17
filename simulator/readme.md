@@ -173,7 +173,7 @@ MQTT_URL = process.env.MQTT_URL || 'mqtt://localhost:1883'
 MQTT_USER = process.env.MQTT_USERNAME || 'iot'
 MQTT_PASS = process.env.MQTT_PASSWORD || 'changeme'
 SENSOR_COUNT = 5 (por defecto)
-INTERVAL_MS = 300000 (5 minutos)
+INTERVAL_MS = 1800000 (30 minutos, como las sondas físicas)
 ```
 
 ### Paso 2: Generación de Sensores
@@ -182,10 +182,11 @@ Se crean `SENSOR_COUNT` dispositivos virtuales con:
 
 - **devEui**: Identificador único de 64 bits (ej: `0011223344556601`)
 - **Ubicación**: Coordenadas GPS basadas en ubicaciones reales de Galicia
-- **Valores base**: 
-  - Humedad: 45-80%
-  - Temperatura: 18-26°C
-  - Batería: 3.85V (degradación simulada)
+- **Valores base** (más deriva senoidal y régimen asignado: sonda 1 aviso, sonda 2 alarma, resto normal):
+  - Humedad nominal: 45-70% (episodios 86-89% / 12-14%)
+  - Temperatura: 16-24°C nominal (rango 8-28°C)
+  - Batería: 3.8-3.95V con degradación lenta (rango 3.0-4.1V)
+  - Presión base propia por sonda (~1002-1012 hPa, rango 980-1020 hPa)
 
 **Ejemplo de sensor generado:**
 
@@ -227,30 +228,38 @@ Cada `INTERVAL_MS`, se ejecuta `transmitUplinks(tick)`:
 Para cada sensor, se calculan valores realistas:
 
 ```javascript
-// Humedad con variación sinusoidal + ruido aleatorio
-humidity = baseHumidity + Math.sin(tick * 0.2 + idx) * 5 + (Math.random() * 2 - 1)
+// Humedad objetivo del escenario (normal 35-70% o episodio) + seno lento + ruido
+humidity = clamp(scenarioHumidity(sensor, tick), 35, 70)   // o 86-89% / 12-14% en episodio
 
-// Temperatura con patrón cíclico
-temperature = baseTemp + Math.cos(tick * 0.2 + idx) * 3 + (Math.random() * 0.8 - 0.4)
+// Resto de métricas con rangos razonables (scenarioSecondary)
+temperature = clamp(baseTemp + cos(tick*0.2+idx)*4 + ruido, 8, 28)
+battery     = clamp(baseBattery - tick*0.0005, 3.0, 4.1)   // degradación lenta
+pressure    = clamp(basePressure + sin(tick*0.15+idx)*6 + ruido, 980, 1020)
+rssi = clamp(-95 - random*15, -115, -75)                   // dBm
+snr  = clamp(7.5 + (random*3-1.5), -2, 9)                  // dB
 
-// Degradación de batería (simula desgaste real)
-battery = Math.max(2.9, baseBattery - (tick * 0.0005))
-
-// Señal de radio (RSSI/SNR realistas para LoRaWAN)
-rssi = -95 - Math.floor(Math.random() * 15)  // -95 a -110 dBm
-snr = 7.5 + (Math.random() * 3 - 1.5)        // 6.0 a 9.0 dB
+// N_raw acoplado a la presión de ESE sensor (bucle cerrado con el backend):
+nMean = humidityToNeutrons(humidity, pressure)  // ratio·N0/fp, fp=exp((P0-P)/L)
+neutron_counts = nMean + gauss()*sqrt(nMean)    // ruido Poisson
 ```
 
 #### 4.2 Inyección de Anomalías (si `--anomalies` está activo)
 
-**Sensor 0 (índice 0):**
-- Cada 6 ciclos, durante 3 ciclos: Humedad sube a **86-89%** (anomalía de humedad alta)
-- Luego vuelve a **65.2%** (normal)
+**Motor determinista (ciclo de 10 ticks: 6 normal → 3 anomalía → 1 recuperación,
+fase desplazada por sensor para no solapar aviso y alarma):**
 
-**Sensor 1 (índice 1):**
-- Cada 8 ciclos, durante 3 ciclos: Humedad baja a **22-24%** (anomalía de sequedad extrema)
+**Sonda 1 (régimen `warning-high`):**
+- Durante 3 ticks: humedad objetivo **86-89%** (dispara la regla `humidity >= 85`, warning)
+- Luego vuelve a **65.2%** (resuelve por histéresis, que exige bajar de 82%)
+
+**Sonda 2 (régimen `critical-low`):**
+- Durante 3 ticks: humedad objetivo **12-14%** (dispara `humidity <= 15`, critical)
+- Luego vuelve a **~45-50%** (resuelve por histéresis, que exige subir de 18%)
+
+**Resto:** siempre normal (`35-70%`).
 
 **Propósito:** Probar la **histéresis** del sistema de alertas (disparo y resolución automática).
+Los episodios duran 3 ticks para superar `duration_seconds=300` de las reglas seed.
 
 #### 4.3 Codificación del Payload
 
@@ -275,10 +284,11 @@ data: Buffer.from([
 
 ```javascript
 object: {
-  humidity: 68.42,
+  humidity: 68.42,          // En modo neutrónico el backend la IGNORA y calcula θ desde N_raw
+  neutron_counts: 22.5,     // N_raw = ratio·N0/fp(P_sensor): cierra el bucle con la presión
   temperature: 23.15,
   battery: 3.84,
-  pressure: 1013.2,      // Valor fijo (simulado)
+  pressure: 1007.3,         // Variable por sensor (980-1020 hPa): corrige N en el backend
   latitude: 42.3486,
   longitude: -8.6747
 }
@@ -346,8 +356,8 @@ setInterval(() => {
 
 **Salida en consola:**
 ```
-[12:30:45]  Uplinks LoRaWAN enviados para 5 sensores (Ciclo #1)
- Próximo envío programado en 5 minutos...
+[12:30:45] 📡 Uplinks enviados: 5 sensores (ciclo #1)
+⏳ Próximo envío programado en 30 minutos...
 ```
 
 ---
@@ -412,11 +422,10 @@ Bytes: `[0x02, 0xAC, 0x00, 0xE7, 0x0F, 0x08]`
 | `--pass` | `MQTT_PASSWORD` | String | `changeme` | Contraseña MQTT |
 | `--count` | `SENSOR_COUNT` | Integer | `5` | Número de sensores a simular |
 | `--interval` | `INTERVAL_MS` | Integer | `1800000` (30 min) | Intervalo en ms entre envíos (acelerar tiempo con valores bajos) |
-| `--anomalies` | `INJECT_ANOMALIES` | Flag | `false` | Activar inyección de anomalías |
-| `--neutrons` | `NEUTRON_MODE` | Flag | `true` | Enviar `neutron_counts` para que el backend calcule θ (siempre coherente) |
+| `--anomalies` | `INJECT_ANOMALIES` | Flag | `true` | Episodios aviso/alarma (`INJECT_ANOMALIES=false` los desactiva) |
+| `--neutrons` | `NEUTRON_MODE` | Flag | `true` | Modo CRNS: envía `neutron_counts` (N_raw con ruido Poisson ~sqrt(N), acoplado a la presión del sensor) y el backend calcula θ con el modelo Geant4 (`cornea_pipeline/config/calibration_config.json`, N₀=143.0) |
 | `--no-neutrons` | `NEUTRON_MODE=false` | Flag | — | Solo humedad directa (modo legacy) |
-| `--backfill` | `SIM_BACKFILL` | Integer | `10` | Muestras históricas por sensor al conectar (cada intervalo, sin anomalías, idempotente) |
-| `--neutrons` | | Flag | `false` | Modo CRNS: envía `neutron_counts` (N_raw con ruido Poisson) y el backend calcula θ con el modelo Geant4 (`cornea_pipeline/config/calibration_config.json`, N₀=143.0) |
+| `--backfill` | `SIM_BACKFILL` | Integer | `10` | Muestras históricas por sensor al conectar (cada intervalo, CON episodios para que la gráfica nazca con normalidad+aviso+alarma, timestamps en rejilla, idempotente) |
 
 **Ejemplos avanzados:**
 
@@ -427,8 +436,8 @@ node mock-lora-devices.js --url mqtt://192.168.1.100:1883 --user admin --pass se
 # Simular 20 sensores cada 10 segundos
 node mock-lora-devices.js --count 20 --interval 10000
 
-# Modo rápido sin anomalías
-node mock-lora-devices.js --interval 1000
+# Modo rápido sin anomalías (ojo: por defecto SÍ hay anomalías)
+INJECT_ANOMALIES=false node mock-lora-devices.js --interval 1000
 
 # Combinación de parámetros
 node mock-lora-devices.js --count 50 --interval 5000 --anomalies --url mqtt://broker.hivemq.com:1883

@@ -83,8 +83,10 @@ Todas las rutas son **relativas a la raíz** (sin dependencias de máquina):
 ├── docker-compose.yml           # Stack completo (9 servicios, rutas relativas ./docker/…)
 │
 ├── docker/                      # Configuración de infraestructura
-│   ├── timescale/init.sql       # Esquema: tenants, users, devices, measurements (hypertable),
-│   │                            #   alert_rules, alert_events, notification_logs
+│   ├── timescale/init.sql       # Esquema: tenants, users, devices (con `visible`),
+│   │                            #   measurements (hypertable), alert_rules,
+│   │                            #   alert_events, notification_logs
+│   ├── timescale/migrations/    # 002-007 idempotentes (007 autocreada al arrancar)
 │   ├── mosquitto/mosquitto.conf # Listeners :1883 (mqtt) y :9001 (websockets) + auth
 │   ├── chirpstack/              # Configuración ChirpStack v4
 │   └── chirpstack-gateway-bridge/
@@ -178,9 +180,12 @@ cp .env.example .env
 docker compose up -d --build
 
 # 4. Sembrar datos demo (OBLIGATORIO la primera vez o tras `down -v`).
-#    Se usa `npm --prefix` para que funcione igual en PowerShell, cmd y bash.
-npm --prefix backend install
-npm --prefix backend run seed
+#    OJO: `npm --prefix backend install` falla en algunos npm/PowerShell
+#    (busca el package.json raíz); entra en la carpeta y ejecuta allí.
+cd backend
+npm install
+npm run seed
+cd ..
 
 # 5. Ver estado / logs
 docker compose ps
@@ -194,8 +199,31 @@ docker compose logs -f backend-api
 >
 > El seed (`backend/src/database/seeds/seed.ts`, reejecutable) registra las
 > 5 sondas como **«Sonda 0X · \<lugar reconocible\>»** (código numérico del
-> DevEUI + identificativo) con umbrales agronómicos de Galicia **20–65 %**;
+> DevEUI + identificativo) con umbrales agronómicos de Galicia **15–85 %**;
 > al reejecutarlo actualiza nombres y umbrales de las ya existentes.
+>
+> Si el seed falla con `ECONNREFUSED` o `Connection terminated unexpectedly`,
+> es la red host→contenedor de Windows (el contenedor responde bien por
+> dentro): fuerza IPv4 explícita desde `backend/`:
+>
+> ```powershell
+> cd backend
+> $env:DATABASE_URL="postgresql://iot:changeme_db_password@127.0.0.1:5432/iot"
+> npm run seed
+> ```
+>
+> (sustituye la contraseña por tu `POSTGRES_PASSWORD` del `.env`).
+> Si las tablas ya tienen contenido (`devices`/`users`/`alert_rules`), puedes
+> **omitir el seed**: solo añade catálogo + reglas + 48 h de histórico legacy.
+> Compruébalo sin seed:
+>
+> ```powershell
+> docker compose exec postgres psql -U iot -d iot -c "SELECT (SELECT count(*) FROM devices) AS devices, (SELECT count(*) FROM users) AS users, (SELECT count(*) FROM alert_rules) AS rules;"
+> ```
+>
+> Tras el seed (o si vienes del formato anterior), el histórico legacy de 48 h
+> cada 15 min conviene borrarlo para quedarse solo con telemetría del nuevo
+> formato (ver §9): `DELETE FROM measurements` + refresco de agregados.
 
 Abrir:
 - Dashboard: <http://localhost:3000> (admin@example.com / admin123456)
@@ -231,9 +259,8 @@ npm run simulate:fast    # 5 sensores cada 5 s con anomalías → verás datos e
 
 > Requiere Postgres/TimescaleDB, Redis y Mosquitto accesibles (levántalos con
 > `docker compose up -d postgres redis mosquitto` si no los tienes en local).
-> Para crear el esquema y los datos demo: `npm --prefix backend run seed`
-> (`--prefix` ejecuta el script en esa carpeta y funciona igual en
-> PowerShell, cmd y bash).
+> Para crear el esquema y los datos demo, desde `backend/`: `npm run seed`
+> (con `DATABASE_URL` a `127.0.0.1` si `localhost` falla en Windows).
 
 ### 4.3. Credenciales demo (seed)
 
@@ -365,11 +392,7 @@ measurements(time, device_id, humidity, temperature, pressure, battery,
 > ya creadas, en orden):
 >
 > ```powershell
-> Get-Content docker/timescale/migrations/002_add_neutron_counts.sql -Raw |
->   docker exec -i cornea_postgres psql -U iot -d iot
-> Get-Content docker/timescale/migrations/003_unique_measurement.sql -Raw |
->   docker exec -i cornea_postgres psql -U iot -d iot
-> Get-Content docker/timescale/migrations/004_unique_tenant_name.sql -Raw |
+> Get-Content docker/timescale/migrations/007_add_visible.sql -Raw |
 >   docker exec -i cornea_postgres psql -U iot -d iot
 > ```
 >
@@ -380,9 +403,15 @@ measurements(time, device_id, humidity, temperature, pressure, battery,
 >   que el seed no los multiplique.
 > - `005`: estima N en filas históricas con humedad pero sin neutrones
 >   (inversa Geant4), para coherencia total de registros antiguos.
+> - `006`: añade `place_name` + `pressure` por sonda.
+> - `007`: añade `visible` (mostrar/ocultar en paneles, solo admin).
+>   **No requiere psql manual**: el backend la autocrea al arrancar
+>   (`DatabaseService.ensureVisibleColumn()`), también en volúmenes viejos;
+>   `init.sql` ya la incluye para instalaciones limpias.
 
 Tablas de apoyo: `tenants`, `users`, `devices` (umbrales
-`humidity_min/max_threshold`, `battery_threshold`, `last_seen_at`),
+`humidity_min/max_threshold`, `battery_threshold`, `last_seen_at`,
+`place_name`, `pressure`, **`visible`**),
 `alert_rules`, `alert_events`, `notification_logs`.
 
 ### 6.2. Estado de cada sonda
@@ -476,6 +505,7 @@ roles `admin|operator|viewer` (`shared/guards/`).
 | GET | `/api/v1/devices` | auth | Lista + estado + últimas métricas (`devices/`) |
 | GET | `/api/v1/devices/latest` | auth | Últimas métricas compactas |
 | GET/POST/PATCH/DELETE | `/api/v1/devices[/:id]` | ver/＋admin,operator/＋admin | CRUD sensores |
+| PATCH | `/api/v1/devices/:id/visibility` | **admin** | Mostrar/ocultar en Dashboard y mapas (`{visible}`; no toca ingesta) |
 | GET | `/api/v1/devices/:id/measurements` | auth | Histórico agregado (`telemetry/`) |
 | GET | `/api/v1/devices/:id/export/csv` | auth | Descarga CSV |
 | GET/POST/PATCH/DELETE | `/api/v1/alert-rules[/:id]` | ver/＋admin,operator/＋admin | Reglas (`alerts/`) |
@@ -501,11 +531,12 @@ y anomalías programadas para probar la histéresis. Detalle completo en
 `simulator/readme.md`.
 
 ```powershell
-npm --prefix simulator install
-npm --prefix simulator run simulate:fast      # 5 sondas cada 5 s + anomalías (ideal para demo)
-npm --prefix simulator run simulate:anomalies
-npm --prefix simulator run simulate:neutrons  # modo CRNS explícito (ahora es el defecto)
-npm --prefix simulator run load-test          # 100 sondas cada 2 s (carga)
+cd simulator
+npm install
+npm run simulate:fast      # 5 sondas cada 5 s + anomalías (ideal para demo en local)
+npm run simulate:anomalies # 5 sondas cada 5 min + anomalías (test de alertas)
+npm run simulate:neutrons  # modo CRNS explícito (ya es el defecto)
+npm run load-test          # 100 sondas cada 2 s (carga)
 ```
 
 ```bash
@@ -518,17 +549,52 @@ node mock-lora-devices.js --count 20 --interval 10000 --url mqtt://<broker>:1883
 > el backend estima N con la inversa Geant4. Con Docker no hace falta
 > arrancarlo a mano: el servicio `simulator` del compose (modo neutrónico +
 > anomalías cada 30 min, como las sondas físicas) envía al conectar un
-> **backfill de 10 muestras históricas** por sonda y la primera ráfaga en
-> vivo, así que gráfica y tarjeta N_raw se rellenan solas al levantar el
-> stack. `SIM_INTERVAL_MS` lo acelera y `SIM_BACKFILL` ajusta el histórico
-> inicial (idempotente gracias a la unicidad).
+> **backfill de 10 muestras históricas** por sonda (ya con episodios, para
+> que la gráfica muestre normalidad + aviso + alarma desde el arranque),
+> la primera ráfaga en vivo y luego 1 mensaje/sonda/ciclo. Gráfica y tarjeta
+> N_raw se rellenan solas al levantar el stack (idempotente por la unicidad
+> `(device_id, time)` + timestamps en rejilla).
+>
+> **Motor de escenarios** (ciclo determinista de 10 ticks, fase desplazada
+> por sensor para no solapar aviso y alarma): sonda 1 → episodio
+> `86-89 %` (dispara `humidity >= 85` warning), sonda 2 → episodio
+> `12-14 %` (dispara `humidity <= 15` critical), resto siempre normal
+> `35-70 %`. Episodios de 3 ticks para superar `duration_seconds` y la
+> histéresis. **Física cerrada**: `N_raw = ratio·N0/fp(P_sensor)` con
+> `fp = exp((P0-P)/L)` de `calibration_config.json`, así el θ que calcula
+> el backend coincide con el objetivo (a más N, menos humedad).
+>
+> Variables del script: `MQTT_URL` (def. `mqtt://localhost:1883`),
+> `MQTT_USERNAME`, `MQTT_PASSWORD`, `SENSOR_COUNT` (5), `INTERVAL_MS`
+> (1800000 = 30 min), `INJECT_ANOMALIES` (true), `NEUTRON_MODE` (true),
+> `SIM_BACKFILL` (10), o flags `--url/--user/--pass/--count/--interval/
+> --anomalies/--neutrons/--no-neutrons/--backfill` (el env manda sobre CLI).
 
-> `npm --prefix <carpeta>` funciona igual en PowerShell, cmd y bash, sin
-> necesidad de `cd` ni de `&&` (no soportado en PowerShell 5.1).
+### Opciones en Docker (intervalo y nº de sensores sin tocar código)
 
-Variables: `MQTT_URL` (def. `mqtt://localhost:1883`), `MQTT_USERNAME`,
-`MQTT_PASSWORD` o flags `--url/--user/--pass/--count/--interval/--anomalies`.
+En el `.env` raíz (ya cableadas al servicio `simulator`):
 
+| Variable `.env` | Defecto | Efecto |
+|---|---|---|
+| `SIM_SENSOR_COUNT` | `5` | Nº de sondas simuladas |
+| `SIM_INTERVAL_MS` | `1800000` (30 min) | Cadencia de emisión; p. ej. `5000` para demo en vivo |
+| `SIM_ANOMALIES` | `true` | Episodios aviso/alarma (`false` = todo normal) |
+| `SIM_NEUTRON_MODE` | `true` | Enviar `neutron_counts` (el backend calcula θ) |
+| `SIM_BACKFILL` | `10` | Muestras históricas por sonda al arrancar |
+
+```powershell
+# Ejemplo: 3 sondas cada 10 s para una demo en vivo
+# (editar .env) SIM_SENSOR_COUNT=3 + SIM_INTERVAL_MS=10000, luego:
+docker compose up -d simulator
+
+# Solo reiniciar el simulador (tras limpiar measurements, regenera el backfill)
+docker compose restart simulator
+docker compose logs --tail 20 simulator
+```
+
+> Tras cambiar `.env` basta `up -d` del servicio (las variables se
+> inyectan al recrear el contenedor). Para volver a 30 min reales,
+> comenta las líneas (`#`) y repite `up -d simulator`.
 ---
 
 ## 10. Ingesta HTTP directa (gateways legacy)
@@ -601,6 +667,10 @@ Copiar `cp .env.example .env` y ajustar. Las más relevantes:
 | Simulador `connack timeout` | Broker inaccesible / credenciales | Verifica `:1883`, `MQTT_USERNAME/PASSWORD` o flags `--user/--pass` |
 | Mapa oscuro pide API key | Proveedor Carto con key (ya corregido) | Ambas temas usan OpenStreetMap |
 | `docker compose up` falla por `.env` | Falta el fichero | `cp .env.example .env` primero |
+| `npm --prefix backend install` → `ENOENT .../package.json` | Quirk de npm en PowerShell (mira el package.json raiz) | `cd backend; npm install` (igual para `simulator`/`frontend`) |
+| Seed `ECONNREFUSED` / `Connection terminated unexpectedly` | Red host→contenedor de Windows; el contenedor responde bien por dentro | Desde `backend/`: `$env:DATABASE_URL="postgresql://iot:<pass>@127.0.0.1:5432/iot"; npm run seed`. Si `devices/users/rules` ya existen, omite el seed |
+| `localhost:3000` → `ERR_EMPTY_RESPONSE` / curl `000` con contenedores `healthy` | Proxy de puertos de Docker Desktop colgado (la API `npipe` y `exec` siguen funcionando) | Quit total de Docker Desktop → reabrir → `curl.exe --noproxy "*" http://127.0.0.1:3000/`. Si persiste: Settings → Resources → Network → NAT; ultimo recurso `docker compose down` + `up -d` (sin `-v`) |
+| Cambios de codigo sin efecto / `visible` ausente | Imagenes viejas en marcha (`CREATED hace dias`) | `docker compose up -d --build` (la columna `visible` se autocrea al arrancar el backend) |
 
 ---
 
@@ -636,6 +706,7 @@ docker compose start                               # arrancar lo parado
 
 # Aplicar cambios de código o de compose/.env (reconstruye y recrea)
 docker compose up -d --build backend-api backend-worker
+docker compose up -d --build simulator              # tras cambiar SIM_* en .env
 docker compose up -d                                # levanta lo parado con la config actual
 
 # Entrar a un contenedor / usar recursos
