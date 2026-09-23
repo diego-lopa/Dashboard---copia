@@ -8,12 +8,31 @@ const connectionString =
   process.env.DATABASE_URL ||
   'postgresql://iot:changeme_db_password@localhost:5432/iot?schema=public';
 
+/** Conexión con reintento en 127.0.0.1 si `localhost` falla (red host→contenedor en Windows). */
+async function connectWithFallback(connectionString: string) {
+  const candidates = [connectionString];
+  if (connectionString.includes('localhost')) {
+    candidates.push(connectionString.replace(/localhost/g, '127.0.0.1'));
+  }
+  let lastErr: any = null;
+  for (const cs of candidates) {
+    try {
+      const pool = new Pool({ connectionString: cs });
+      const client = await pool.connect();
+      if (cs !== connectionString) console.log('🔁 Reintentando con 127.0.0.1…');
+      return { pool, client };
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
 async function seed() {
   console.log('🌱 Iniciando Seed de base de datos...');
-  const pool = new Pool({ connectionString });
+  const { pool, client } = await connectWithFallback(connectionString);
 
   try {
-    const client = await pool.connect();
 
     // 1. Recuperar o crear Tenant (determinista: nunca duplica).
     // Prioridad: tenant con dispositivos > tenant más antiguo > crear uno.
@@ -58,12 +77,24 @@ async function seed() {
     `);
     console.log('✅ Usuarios seed creados (admin@example.com / admin123456)');
 
-    // 3. Crear Dispositivos LoRaWAN de Demostración (Galicia: Pontevedra y Santiago de Compostela)
+    // 3. Red fija de 3 sensores CORNEA (mismos DevEUI/nombre que el simulador).
     const sampleDevices = [
       {
         dev_eui: '0011223344556601',
-        name: 'Sonda 01 · Lago de Castiñeiras (Pontevedra)',
-        description: 'Sonda CRNS de humedad y temperatura en parque natural Lago de Castiñeiras',
+        name: 'CORNEA 01 - Polígono da Sionlla (Santiago)',
+        description: 'Sensor CORNEA CRNS de humedad y temperatura en Polígono da Sionlla (Santiago de Compostela)',
+        group_name: 'Santiago - Polígono da Sionlla',
+        latitude: 42.910917,
+        longitude: -8.491110,
+        place_name: 'Polígono da Sionlla, Santiago de Compostela',
+        pressure: 1011.6,
+        humidity_min: 15.0,
+        humidity_max: 85.0,
+      },
+      {
+        dev_eui: '0011223344556602',
+        name: 'CORNEA 02 - Lago de Castiñeiras (Pontevedra)',
+        description: 'Sensor CORNEA CRNS de humedad y temperatura en parque natural Lago de Castiñeiras',
         group_name: 'Pontevedra - Lago de Castiñeiras',
         latitude: 42.348600,
         longitude: -8.674700,
@@ -73,45 +104,9 @@ async function seed() {
         humidity_max: 85.0,
       },
       {
-        dev_eui: '0011223344556602',
-        name: 'Sonda 02 · Lago de Castiñeiras – Estación (Pontevedra)',
-        description: 'Estación agroclimática CRNS: humedad, temperatura y pluviometría',
-        group_name: 'Pontevedra - Lago de Castiñeiras',
-        latitude: 42.349500,
-        longitude: -8.673800,
-        place_name: 'Lago de Castiñeiras — Estación, Pontevedra',
-        pressure: 1012.8,
-        humidity_min: 15.0,
-        humidity_max: 85.0,
-      },
-      {
         dev_eui: '0011223344556603',
-        name: 'Sonda 03 · Polígono da Sionlla (Santiago)',
-        description: 'Sonda CRNS ambiental e industrial en Polígono da Sionlla (Santiago de Compostela)',
-        group_name: 'Santiago - Polígono da Sionlla',
-        latitude: 42.913500,
-        longitude: -8.513200,
-        place_name: 'Polígono da Sionlla, Santiago de Compostela',
-        pressure: 1011.6,
-        humidity_min: 15.0,
-        humidity_max: 85.0,
-      },
-      {
-        dev_eui: '0011223344556604',
-        name: 'Sonda 04 · Polígono da Sionlla – Aire (Santiago)',
-        description: 'Sonda CRNS de calidad ambiental y partículas',
-        group_name: 'Santiago - Polígono da Sionlla',
-        latitude: 42.914200,
-        longitude: -8.512000,
-        place_name: 'Polígono da Sionlla, Santiago de Compostela',
-        pressure: 1011.6,
-        humidity_min: 15.0,
-        humidity_max: 85.0,
-      },
-      {
-        dev_eui: '0011223344556605',
-        name: 'Sonda 05 · Monte Aloia, Tui (Pontevedra)',
-        description: 'Sonda CRNS forestal en Parque Natural Monte Aloia (Tui - Provincia de Pontevedra)',
+        name: 'CORNEA 03 - Monte Aloia, Tui (Pontevedra)',
+        description: 'Sensor CORNEA CRNS forestal en Parque Natural Monte Aloia (Tui - Provincia de Pontevedra)',
         group_name: 'Pontevedra - Monte Aloia (Tui)',
         latitude: 42.068200,
         longitude: -8.675000,
@@ -126,7 +121,7 @@ async function seed() {
 
     for (const dev of sampleDevices) {
       const devRes = await client.query(`
-        INSERT INTO devices (tenant_id, dev_eui, name, description, group_name, latitude, longitude, place_name, pressure, humidity_min_threshold, humidity_max_threshold, last_seen_at)
+        INSERT INTO devices (tenant_id, dev_eui, name, description, group_name, latitude, longitude, place_name, pressure, humidity_min_threshold, humidity_max_threshold, enabled, visible, last_seen_at)
         VALUES (
           '${tenantId}',
           '${dev.dev_eui}',
@@ -139,22 +134,40 @@ async function seed() {
           ${dev.pressure ?? 'NULL'},
           ${dev.humidity_min},
           ${dev.humidity_max},
+          true,
+          true,
           now()
         )
         ON CONFLICT (dev_eui) DO UPDATE SET
           name = EXCLUDED.name,
+          description = EXCLUDED.description,
+          group_name = EXCLUDED.group_name,
           latitude = EXCLUDED.latitude,
           longitude = EXCLUDED.longitude,
           place_name = EXCLUDED.place_name,
           pressure = EXCLUDED.pressure,
           humidity_min_threshold = EXCLUDED.humidity_min_threshold,
           humidity_max_threshold = EXCLUDED.humidity_max_threshold,
+          enabled = true,
+          visible = true,
           last_seen_at = now()
         RETURNING id;
       `);
       deviceIds.push(devRes.rows[0].id);
     }
-    console.log(`✅ ${deviceIds.length} dispositivos LoRaWAN registrados`);
+    console.log(`✅ ${deviceIds.length} sensores CORNEA registrados, activados y visibles`);
+
+    // 3b. Retirar sondas demo legacy (04/05) que ya no forman parte de la red
+    // de 3 sensores (solo esos DevEUI; nunca toca dispositivos reales).
+    // El borrado arrastra su telemetría y alertas (ON DELETE CASCADE).
+    const stale = await client.query(`
+      DELETE FROM devices
+      WHERE dev_eui IN ('0011223344556604', '0011223344556605')
+      RETURNING dev_eui;
+    `);
+    if (stale.rows.length > 0) {
+      console.log(`🧹 Sondas legacy retiradas: ${stale.rows.map((r) => r.dev_eui).join(', ')}`);
+    }
 
     // 4. Reglas de Alerta Predeterminadas (rango humedad 15–85 %: fuera de rango dispara).
     // 4a. Normalizar reglas globales de humedad existentes (idempotente, no duplica)

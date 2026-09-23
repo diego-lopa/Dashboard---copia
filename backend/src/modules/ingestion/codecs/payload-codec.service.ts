@@ -184,6 +184,7 @@ export class PayloadCodecService {
 
     return {
       devEui,
+      deviceName: msg.deviceInfo?.deviceName,
       timestamp: ts,
       humidity,
       temperature,

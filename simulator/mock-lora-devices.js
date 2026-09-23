@@ -6,11 +6,13 @@
  *   1. CONFIG (env/CLI) → 2. PERFILES SENSORES → 3. MOTOR ESCENARIOS
  *   → 4. FISICA NEUTRONES → 5. BUILDER PAYLOAD → 6. SCHEDULER
  *
+ * Red fija: 3 sensores CORNEA (mismos DevEUI/nombre que el seed del backend).
+ * Anomalías excepcionales: 1 mensaje anómalo cada 20 por sensor con régimen
+ * (CORNEA 01 → aviso >85 %, CORNEA 02 → alarma <15 %, CORNEA 03 → normal).
+ *
  * Uso:
- *   node mock-lora-devices.js                             # Cada 30 minutos reales
- *   node mock-lora-devices.js --interval 5000             # Rápido para pruebas (5 seg)
- *   node mock-lora-devices.js --interval 5000 --neutrons  # CRNS acelerado
- *   node mock-lora-devices.js --count 100 --interval 2000 # Prueba de carga
+ *   node mock-lora-devices.js                 # Cada 30 minutos reales
+ *   node mock-lora-devices.js --interval 5000 # Rápido para pruebas (5 seg)
  */
 
 // ============================================================================
@@ -27,8 +29,8 @@ const getArg = (flag, defaultVal) => {
 const MQTT_URL = process.env.MQTT_URL || getArg('--url', 'mqtt://localhost:1883');
 const MQTT_USER = process.env.MQTT_USERNAME || getArg('--user', 'iot');
 const MQTT_PASS = process.env.MQTT_PASSWORD || getArg('--pass', 'changeme');
-const SENSOR_COUNT = parseInt(process.env.SENSOR_COUNT || getArg('--count', '5'), 10);
-// 30 minutos reales por defecto (1800000 ms), como las sondas físicas.
+const SENSOR_COUNT_REQ = parseInt(process.env.SENSOR_COUNT || getArg('--count', '3'), 10);
+// 30 minutos reales por defecto (1800000 ms), como los sensores físicos.
 const INTERVAL_MS = parseInt(process.env.INTERVAL_MS || getArg('--interval', '1800000'), 10);
 const INJECT_ANOMALIES =
   process.env.INJECT_ANOMALIES === 'false' ? false : args.includes('--anomalies') || true;
@@ -44,7 +46,10 @@ console.log('📡 ============================================================='
 console.log('   CORNEA IoT - SIMULADOR DE RED LORAWAN (Neutron Insights)');
 console.log('=============================================================');
 console.log(`Broker MQTT: ${MQTT_URL}`);
-console.log(`Dispositivos activos: ${SENSOR_COUNT}`);
+if (SENSOR_COUNT_REQ !== 3) {
+  console.log(`⚠️  Red CORNEA fija de 3 sensores: se ignora SENSOR_COUNT=${SENSOR_COUNT_REQ}.`);
+}
+console.log('Sensores CORNEA: 3 (01 Sionlla, 02 Castiñeiras, 03 Aloia)');
 console.log(`Intervalo de transmisión: ${INTERVAL_MS / 1000} segundos (${INTERVAL_MS / 60000} minutos)`);
 console.log(`Backfill histórico: ${BACKFILL} muestras previas cada ${INTERVAL_MS / 60000} min`);
 console.log(`Inyección de anomalías: ${INJECT_ANOMALIES ? 'ACTIVADA' : 'DESACTIVADA'}`);
@@ -52,49 +57,64 @@ console.log(`Modo neutrónico CRNS: ${NEUTRON_MODE ? 'ACTIVADO (θ calculada en 
 console.log('-------------------------------------------------------------');
 
 // ============================================================================
-// 2. PERFILES SENSORES (DevEUI, nombre, ubicación, bases, régimen asignado)
-//    Regímenes: sensor 0 → aviso (>85%), sensor 1 → alarma (<15%),
-//    resto → siempre normal. Determinista para garantizar cobertura.
+// 2. PERFILES SENSORES — red fija de 3 sensores CORNEA (mismos DevEUI y
+//    nombre que el seed del backend para que seed y simulador coincidan).
+//    Regímenes: CORNEA 01 → aviso (>85%), CORNEA 02 → alarma (<15%),
+//    CORNEA 03 → siempre normal.
 // ============================================================================
-const galiciaLocations = [
-  { name: 'Sensor Humedad - Lago de Castiñeiras (Pontevedra)', lat: 42.3486, lng: -8.6747 },
-  { name: 'Estación Ambiental - Lago de Castiñeiras (Pontevedra)', lat: 42.3495, lng: -8.6738 },
-  { name: 'Sensor Nivel Industrial - Polígono da Sionlla (Santiago)', lat: 42.9135, lng: -8.5132 },
-  { name: 'Sensor Calidad Aire - Polígono da Sionlla (Santiago)', lat: 42.9142, lng: -8.5120 },
-  { name: 'Sensor Agroclimático - Monte Aloia (Pontevedra)', lat: 42.0682, lng: -8.6750 },
-];
-
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
-const sensors = [];
-for (let i = 1; i <= SENSOR_COUNT; i++) {
-  const hexSuffix = i.toString(16).padStart(2, '0');
-  const locIndex = (i - 1) % galiciaLocations.length;
-  const loc = galiciaLocations[locIndex];
-  const regime = i === 1 ? 'warning-high' : i === 2 ? 'critical-low' : 'normal';
-  sensors.push({
-    devEui: `00112233445566${hexSuffix}`.toUpperCase(),
-    name: SENSOR_COUNT <= 5 ? loc.name : `Sensor LoRaWAN #${i}`,
-    regime,
-    baseHumidity: 45 + ((i * 6) % 25), // 45-70% nominal
-    baseTemp: 16 + ((i * 1.5) % 8), // 16-24°C nominal
-    baseBattery: 3.95 - (i * 0.03), // 3.8-3.95V inicial
-    basePressure: 1002 + (i % 5) * 2.5, // ~1002-1012 hPa
-    lat: loc.lat + Math.floor(i / galiciaLocations.length) * 0.001,
-    lng: loc.lng + Math.floor(i / galiciaLocations.length) * 0.001,
+const sensors = [
+  {
+    devEui: '0011223344556601',
+    name: 'CORNEA 01 - Polígono da Sionlla (Santiago)',
+    regime: 'warning-high',
+    baseHumidity: 55,
+    baseTemp: 19,
+    baseBattery: 3.9,
+    basePressure: 1011.6,
+    lat: 42.910917,
+    lng: -8.49111,
     fcnt: 100,
-  });
-}
+  },
+  {
+    devEui: '0011223344556602',
+    name: 'CORNEA 02 - Lago de Castiñeiras (Pontevedra)',
+    regime: 'critical-low',
+    baseHumidity: 50,
+    baseTemp: 18,
+    baseBattery: 3.87,
+    basePressure: 1012.8,
+    lat: 42.3486,
+    lng: -8.6747,
+    fcnt: 100,
+  },
+  {
+    devEui: '0011223344556603',
+    name: 'CORNEA 03 - Monte Aloia, Tui (Pontevedra)',
+    regime: 'normal',
+    baseHumidity: 58,
+    baseTemp: 17,
+    baseBattery: 3.84,
+    basePressure: 1013.4,
+    lat: 42.0682,
+    lng: -8.675,
+    fcnt: 100,
+  },
+];
 
 // ============================================================================
 // 3. MOTOR ESCENARIOS — humedad objetivo por (sensor, tick)
 //    Reglas seed: warning humidity >= 85 (histeresis 3 → resuelve < 82),
 //    critical humidity <= 15 (histeresis 3 → resuelve > 18).
-//    Episodios sostenidos de 3 ticks para superar duration_seconds=300s
-//    y permitir disparo + resolución visibles en gráfica/alertas.
-//    Ciclo determinista de 10 ticks: 6 normal → 3 anomalía → 1 recuperación.
+//    Avisos/alertas EXCEPCIONALES: 1 mensaje anómalo cada 20 por sensor con
+//    régimen (CORNEA 01 en tick%20==0, CORNEA 02 en tick%20==10: nunca el
+//    mismo ciclo). El tick siguiente vuelve a normal y resuelve por
+//    histéresis. NOTA: el backend suaviza θ con EMA (α=0.3 anti-Poisson),
+//    así que el pico aislado se ve en gráfica/raw pero solo dispara evento
+//    si el suavizado cruza el umbral (arranques en frío o rachas de ruido).
 // ============================================================================
-const CYCLE = 10;
+const CYCLE = 20;
 
 function scenarioHumidity(sensor, tick, anomaliesOn) {
   // Base normal: deriva lenta senoidal + ruido leve (35-70%).
@@ -105,17 +125,9 @@ function scenarioHumidity(sensor, tick, anomaliesOn) {
 
   if (!anomaliesOn || sensor.regime === 'normal') return normal;
 
-  // Fase desplazada por sensor para no disparar aviso+alarma en el mismo tick.
-  const phase = (((tick + idx * 4) % CYCLE) + CYCLE) % CYCLE;
-  if (phase <= 5) return clamp(normal, 40, 70); // normalidad
-  if (phase <= 8) {
-    // episodio anomalía sostenido
-    if (sensor.regime === 'warning-high') return 86 + Math.random() * 3; // 86-89%
-    if (sensor.regime === 'critical-low') return 12 + Math.random() * 2; // 12-14%
-  }
-  // tick 9: recuperación (resuelve por histéresis)
-  if (sensor.regime === 'warning-high') return 65.2;
-  if (sensor.regime === 'critical-low') return 45 + Math.random() * 5;
+  // 1 de cada 20 mensajes, escalonado entre sensores.
+  if (sensor.regime === 'warning-high' && tick % CYCLE === 0) return 86 + Math.random() * 3; // 86-89%
+  if (sensor.regime === 'critical-low' && tick % CYCLE === 10) return 12 + Math.random() * 2; // 12-14%
   return normal;
 }
 
@@ -246,8 +258,8 @@ client.on('connect', () => {
   console.log('🚀 Enviando histórico + primera ráfaga de telemetría...\n');
 
   // Backfill: 10 registros previos separados INTERVAL_MS (más antiguo primero),
-  // CON episodios (anomalías activadas) para que el histórico ya muestre
-  // normalidad + aviso + alarma y la gráfica evidencie N↔θ contrarios.
+  // con el ritmo 1/20 (el tick 1000 cae en pico de CORNEA 01: el histórico
+  // ya muestra 1 excursión excepcional y la gráfica evidencia N↔θ contrarios).
   // Timestamps en rejilla de intervalo (idempotente con ON CONFLICT).
   if (BACKFILL > 0) {
     const grid = Math.max(1000, INTERVAL_MS);

@@ -37,10 +37,11 @@ export class IngestionService {
         this.logger.warn(`Telemetría fuera de rangos físicos para ${devEui}: ${JSON.stringify(uplink)}`);
       }
 
-      // 2. Buscar o auto-provisionar dispositivo
+      // 2. Buscar o auto-provisionar dispositivo (con el nombre que traiga
+      // el uplink: los sensores del simulador gestionable aparecen ya nombrados)
       let device = await this.findDeviceByDevEui(devEui);
       if (!device) {
-        device = await this.autoProvisionDevice(devEui);
+        device = await this.autoProvisionDevice(devEui, uplink.deviceName);
       }
 
       if (!device.enabled) {
@@ -99,13 +100,16 @@ export class IngestionService {
         uplink.neutron_counts ?? null,
       ]);
 
-      // 4. Actualizar last_seen_at y coordenadas en tabla devices
+      // 4. Actualizar last_seen_at (monótono: GREATEST) y coordenadas.
+      // Sin GREATEST, una ráfaga concurrente (p. ej. backfill) deja el
+      // instante del mensaje que se procese en último lugar aunque sea viejo,
+      // y la sonda aparece offline teniéndo datos recientes.
       await this.db.query(
-        `UPDATE devices 
-         SET last_seen_at = $1, 
-             latitude = COALESCE($2, latitude), 
-             longitude = COALESCE($3, longitude), 
-             updated_at = now() 
+        `UPDATE devices
+         SET last_seen_at = GREATEST(COALESCE(last_seen_at, $1::timestamptz), $1::timestamptz),
+             latitude = COALESCE($2, latitude),
+             longitude = COALESCE($3, longitude),
+             updated_at = now()
          WHERE id = $4`,
         [timestamp, uplink.latitude || null, uplink.longitude || null, device.id],
       );
@@ -147,7 +151,7 @@ export class IngestionService {
     return res.rows[0] || null;
   }
 
-  private async autoProvisionDevice(devEui: string) {
+  private async autoProvisionDevice(devEui: string, deviceName?: string) {
     this.logger.log(`Auto-aprovisionando nuevo sensor LoRaWAN detectado: ${devEui}`);
     const tenantRes = await this.db.query('SELECT id FROM tenants LIMIT 1');
     const tenantId = tenantRes.rows[0]?.id;
@@ -156,6 +160,9 @@ export class IngestionService {
       throw new Error('No existe ningún tenant para asociar el dispositivo auto-descubierto');
     }
 
+    const name =
+      deviceName && deviceName.trim() !== '' ? deviceName.trim().slice(0, 255) : `Sensor LoRaWAN (${devEui.slice(-4)})`;
+
     const insertRes = await this.db.query(
       `INSERT INTO devices (tenant_id, dev_eui, name, description, group_name, enabled, last_seen_at)
        VALUES ($1, $2, $3, $4, $5, true, now())
@@ -163,7 +170,7 @@ export class IngestionService {
       [
         tenantId,
         devEui,
-        `Sensor LoRaWAN (${devEui.slice(-4)})`,
+        name,
         'Sensor auto-aprovisionado automáticamente tras recibir primer uplink',
         'Auto-Descubiertos',
       ],

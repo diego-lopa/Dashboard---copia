@@ -225,9 +225,14 @@ services:
       - cornea_net
 
   # ----------------------------------------------------------------------------
-  # 8. SIMULADOR DE SENSORES: tráfico demo automático (neutrones CRNS)
+  # 8. SIMULADOR DE SENSORES LEGACY (terminal): JUBILADO, sustituido por el
+  #    simulador gestionable del panel admin (tablas sim_state/sim_sensors,
+  #    emite el worker). Perfil `sim-legacy`: con `up -d` normal NO arranca;
+  #    solo con `docker compose --profile sim-legacy up -d simulator`.
+  #    No borrar: útil como generador externo/MQTT de repuesto.
   # ----------------------------------------------------------------------------
   simulator:
+    profiles: ["sim-legacy"]
     build:
       context: ./simulator
       dockerfile: Dockerfile
@@ -242,7 +247,7 @@ services:
       - MQTT_URL=mqtt://mosquitto:1883
       - MQTT_USERNAME=${MQTT_USERNAME:-iot}
       - MQTT_PASSWORD=${MQTT_PASSWORD:-changeme}
-      - SENSOR_COUNT=${SIM_SENSOR_COUNT:-5}
+      - SENSOR_COUNT=${SIM_SENSOR_COUNT:-3}
       # 30 min como las sondas físicas; primera ráfaga inmediata al conectar.
       # Para acelerar el tiempo simulado, bajar SIM_INTERVAL_MS (p. ej. 5000).
       - INTERVAL_MS=${SIM_INTERVAL_MS:-1800000}

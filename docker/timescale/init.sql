@@ -186,6 +186,10 @@ CREATE TABLE IF NOT EXISTS alert_events (
 
 CREATE INDEX IF NOT EXISTS idx_alert_events_state ON alert_events(state, triggered_at DESC);
 CREATE INDEX IF NOT EXISTS idx_alert_events_device ON alert_events(device_id, triggered_at DESC);
+-- Una sola alerta activa por (regla, sonda): anti-duplicados concurrentes
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_alert_per_rule_device
+  ON alert_events (rule_id, device_id)
+  WHERE state IN ('triggered', 'acknowledged');
 
 -- 8. NOTIFICATION LOGS
 CREATE TABLE IF NOT EXISTS notification_logs (
@@ -199,3 +203,36 @@ CREATE TABLE IF NOT EXISTS notification_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_notification_logs_event ON notification_logs(alert_event_id);
+
+-- 9. SIMULADOR GESTIONABLE (panel admin): interruptor + perfiles virtuales.
+-- El worker publica uplinks ChirpStack v4 por MQTT cuando está activado.
+CREATE TABLE IF NOT EXISTS sim_state (
+    tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+    enabled BOOLEAN NOT NULL DEFAULT false,
+    interval_ms INTEGER NOT NULL DEFAULT 30000,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS sim_sensors (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    dev_eui VARCHAR(32) UNIQUE NOT NULL,
+    base_humidity DOUBLE PRECISION NOT NULL DEFAULT 55.0,
+    base_temp DOUBLE PRECISION NOT NULL DEFAULT 19.0,
+    base_battery DOUBLE PRECISION NOT NULL DEFAULT 3.9,
+    base_pressure DOUBLE PRECISION NOT NULL DEFAULT 1012.0,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    anomaly_mode VARCHAR(10) NOT NULL DEFAULT 'none' CHECK (anomaly_mode IN ('none', 'high', 'low')),
+    anomaly_every INTEGER NOT NULL DEFAULT 20,
+    humidity_min_threshold DOUBLE PRECISION NOT NULL DEFAULT 15.0,
+    humidity_max_threshold DOUBLE PRECISION NOT NULL DEFAULT 85.0,
+    battery_threshold DOUBLE PRECISION NOT NULL DEFAULT 20.0,
+    enabled BOOLEAN NOT NULL DEFAULT true,
+    tick BIGINT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sim_sensors_tenant ON sim_sensors(tenant_id, enabled);

@@ -12,6 +12,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { IngestionModule } from './modules/ingestion/ingestion.module';
 import { SystemModule } from './modules/system/system.module';
+import { SimModule } from './modules/sim/sim.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { SystemModule } from './modules/system/system.module';
     AlertsModule,
     IngestionModule,
     SystemModule,
+    SimModule,
   ],
 })
 export class AppModule {}

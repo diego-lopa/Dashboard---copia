@@ -59,6 +59,8 @@ export interface MeasurementRecord {
 
 export interface NormalizedUplink {
   devEui: string;
+  /** Nombre del sensor según el gateway/ChirpStack (para auto-aprovisionar con nombre). */
+  deviceName?: string;
   timestamp?: string;
   humidity?: number;
   temperature?: number;

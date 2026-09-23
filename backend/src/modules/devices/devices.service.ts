@@ -60,7 +60,12 @@ export class DevicesService {
           WHEN NOT d.enabled THEN 'offline'
           WHEN d.last_seen_at IS NULL OR d.last_seen_at < $2::timestamptz THEN 'offline'
           WHEN COALESCE(ac.alert_count, 0) > 0 THEN 'warning'
-          WHEN lm.latest_battery IS NOT NULL AND lm.latest_battery <= d.battery_threshold THEN 'warning'
+          -- Batería baja con la misma semántica que frontend/backend:
+          -- umbral > 15 en %, <= 15 en voltios.
+          WHEN lm.latest_battery IS NOT NULL AND (
+            (d.battery_threshold > 15 AND LEAST(100, GREATEST(0, (lm.latest_battery - 3.0) / 1.2 * 100)) <= d.battery_threshold)
+            OR (d.battery_threshold <= 15 AND lm.latest_battery <= d.battery_threshold)
+          ) THEN 'warning'
           ELSE 'online'
         END as status
       FROM devices d
@@ -121,7 +126,12 @@ export class DevicesService {
           WHEN NOT d.enabled THEN 'offline'
           WHEN d.last_seen_at IS NULL OR d.last_seen_at < $3::timestamptz THEN 'offline'
           WHEN COALESCE(ac.alert_count, 0) > 0 THEN 'warning'
-          WHEN lm.latest_battery IS NOT NULL AND lm.latest_battery <= d.battery_threshold THEN 'warning'
+          -- Batería baja con la misma semántica que frontend/backend:
+          -- umbral > 15 en %, <= 15 en voltios.
+          WHEN lm.latest_battery IS NOT NULL AND (
+            (d.battery_threshold > 15 AND LEAST(100, GREATEST(0, (lm.latest_battery - 3.0) / 1.2 * 100)) <= d.battery_threshold)
+            OR (d.battery_threshold <= 15 AND lm.latest_battery <= d.battery_threshold)
+          ) THEN 'warning'
           ELSE 'online'
         END as status
       FROM devices d

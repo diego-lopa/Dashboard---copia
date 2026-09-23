@@ -4,6 +4,7 @@ import { DatabaseService } from '../../database/database.service';
 import { RealtimeService } from '../realtime/realtime.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { NormalizedUplink } from '../../shared/types';
+import { batteryPercent } from '../../shared/utils/battery';
 
 @Injectable()
 export class AlertsEngineService {
@@ -41,8 +42,17 @@ export class AlertsEngineService {
   }
 
   private async evaluateRule(rule: any, device: any, uplink: NormalizedUplink) {
-    const value = this.extractMetricValue(rule.metric, uplink);
+    let value = this.extractMetricValue(rule.metric, uplink);
     if (value === undefined || value === null || isNaN(value)) return;
+
+    // Batería: el umbral puede venir en % (>15) o en V (<=15), igual que el
+    // frontend. Se convierte el valor a la unidad del umbral antes de comparar
+    // (antes se comparaban voltios contra 20 y TODO disparaba "batería baja").
+    if (rule.metric?.toLowerCase() === 'battery' && rule.threshold > 15) {
+      const pct = batteryPercent(value);
+      if (pct === null) return;
+      value = pct;
+    }
 
     // Buscar si ya existe una alerta activa para este rule_id y device_id
     const activeEventRes = await this.db.query(
@@ -126,14 +136,28 @@ export class AlertsEngineService {
     const message = `Alerta ${rule.name}: ${rule.metric} ${rule.condition} ${rule.threshold} (Valor detectado: ${value})`;
     this.logger.warn(`🚨 DISPARANDO ALERTA: ${device.name} -> ${message}`);
 
+    // ON CONFLICT DO NOTHING (índice único parcial migración 008): si dos
+    // uplinks concurrentes disparan a la vez, solo uno inserta; el otro
+    // reutiliza el evento activo ya creado en lugar de duplicar.
     const res = await this.db.query(
       `INSERT INTO alert_events (rule_id, device_id, state, severity, value, message, triggered_at)
        VALUES ($1, $2, 'triggered', $3, $4, $5, now())
+       ON CONFLICT (rule_id, device_id) WHERE state IN ('triggered', 'acknowledged') DO NOTHING
        RETURNING *`,
       [rule.id, device.id, rule.severity, value, message],
     );
 
-    const newEvent = res.rows[0];
+    const newEvent =
+      res.rows[0] ??
+      (
+        await this.db.query(
+          `SELECT * FROM alert_events
+           WHERE rule_id = $1 AND device_id = $2 AND state IN ('triggered', 'acknowledged')
+           ORDER BY triggered_at DESC LIMIT 1`,
+          [rule.id, device.id],
+        )
+      ).rows[0];
+    if (!newEvent) return;
 
     // 1. Notificar en tiempo real al frontend
     this.realtime.broadcastAlert(device.id, {

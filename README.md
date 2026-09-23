@@ -166,45 +166,60 @@ Todas las rutas son **relativas a la raíz** (sin dependencias de máquina):
 
 ## 4. Puesta en marcha
 
-### 4.1. Todo con Docker (1 comando)
+### 4.1. Arranque completo con Docker (copia y pega en orden)
+
+> Requisito previo: **Docker Desktop abierto y en verde (Running)**.
+> Sin Docker no hay contenedores, ni BD, ni app.
 
 ```powershell
-# 1. Clonar y entrar (ruta relativa a donde lo clones)
+# ── PASO 0. Abrir terminal en la carpeta del proyecto ──
+# Si es la primera vez: descargar o clonar el repositorio y entrar en él.
+# (Si ya la tienes descomprimida, abre PowerShell directamente en esa carpeta).
 git clone <URL-del-repo> cornea
 cd cornea
 
-# 2. Variables de entorno (los valores demo ya vienen listos)
-cp .env.example .env
+# ── PASO 1. Crear el fichero de configuración ──
+# Solo la primera vez (los valores demo ya vienen listos).
+Copy-Item .env.example .env
 
-# 3. Construir y levantar el stack
+# ── PASO 2. Crear las imágenes e iniciar la app ──
+# Descarga Node/postgres/mosquitto, compila backend+frontend y levanta los 9 servicios.
+# Tarda varios minutos la primera vez; las siguientes, segundos.
 docker compose up -d --build
 
-# 4. Sembrar datos demo (OBLIGATORIO la primera vez o tras `down -v`).
-#    OJO: `npm --prefix backend install` falla en algunos npm/PowerShell
-#    (busca el package.json raíz); entra en la carpeta y ejecuta allí.
+# ── PASO 3. Comprobar que todo está en marcha ──
+docker compose ps
+# Todo debe salir "Up (healthy)". Si algún puerto falla con 000/ERR_EMPTY_RESPONSE
+# con todo en verde, reinicia Docker Desktop del todo (Quit + abrir) y repite el test:
+curl.exe --noproxy "*" -s -o NUL -w "%{http_code}\n" http://127.0.0.1:3000/   # debe dar 200
+
+# ── PASO 4. Crear usuarios y sensores (SOLO la primera vez o tras "down -v") ──
+# Si la BD ya tiene contenido, SÁLTALO (compruébalo con el comando del recuadro de abajo).
 cd backend
 npm install
 npm run seed
 cd ..
-
-# 5. Ver estado / logs
-docker compose ps
-docker compose logs -f backend-api
 ```
 
-> Sin el paso 4 la tabla `users` queda vacía y el login devuelve
-> `401 Credenciales inválidas` aunque todos los contenedores estén en verde
-> (el `init.sql` solo crea el esquema; el seed crea usuarios, sondas, reglas
-> e histórico de 48 h).
+Abrir:
+- Dashboard: <http://localhost:3000> (o `http://127.0.0.1:3000`) — `admin@example.com` / `admin123456`
+- Swagger API: <http://localhost:8000/api/docs>
+- ChirpStack: <http://localhost:8080>
+
+**PASO 5. Activar los datos de prueba (sin terminales):** entra como admin a
+`Administración → Simulador de datos de prueba`, pulsa el interruptor verde
+y fija la frecuencia en segundos (p. ej. 30 para demo en vivo, 1800 = 30 min como las
+sondas reales). Los 3 CORNEA ya vienen importados y aparecen solos en el panel.
+
+> El contenedor `frontend` sirve la build de producción y redirige `/api/*`
+> al backend interno, así que no necesita `VITE_API_URL` del navegador.
 >
-> El seed (`backend/src/database/seeds/seed.ts`, reejecutable) registra las
-> 5 sondas como **«Sonda 0X · \<lugar reconocible\>»** (código numérico del
-> DevEUI + identificativo) con umbrales agronómicos de Galicia **15–85 %**;
-> al reejecutarlo actualiza nombres y umbrales de las ya existentes.
+> **Notas del PASO 4 (seed):** sin seed la tabla `users` queda vacía y el login da
+> `401 Credenciales inválidas` con todo en verde. El seed es reejecutable: registra los
+> 3 CORNEA, los activa (`enabled`) y muestra (`visible`), y retira las legacy 04/05.
+> Cada `npm run seed` deja los 3 visibles en la app.
 >
-> Si el seed falla con `ECONNREFUSED` o `Connection terminated unexpectedly`,
-> es la red host→contenedor de Windows (el contenedor responde bien por
-> dentro): fuerza IPv4 explícita desde `backend/`:
+> Si falla con `ECONNREFUSED`/`Connection terminated`, fuerza IPv4 desde `backend/`:
 >
 > ```powershell
 > cd backend
@@ -212,26 +227,14 @@ docker compose logs -f backend-api
 > npm run seed
 > ```
 >
-> (sustituye la contraseña por tu `POSTGRES_PASSWORD` del `.env`).
-> Si las tablas ya tienen contenido (`devices`/`users`/`alert_rules`), puedes
-> **omitir el seed**: solo añade catálogo + reglas + 48 h de histórico legacy.
-> Compruébalo sin seed:
+> (usa tu `POSTGRES_PASSWORD` del `.env`). Si ya hay contenido, sáltalo:
 >
 > ```powershell
 > docker compose exec postgres psql -U iot -d iot -c "SELECT (SELECT count(*) FROM devices) AS devices, (SELECT count(*) FROM users) AS users, (SELECT count(*) FROM alert_rules) AS rules;"
 > ```
 >
-> Tras el seed (o si vienes del formato anterior), el histórico legacy de 48 h
-> cada 15 min conviene borrarlo para quedarse solo con telemetría del nuevo
-> formato (ver §9): `DELETE FROM measurements` + refresco de agregados.
-
-Abrir:
-- Dashboard: <http://localhost:3000> (admin@example.com / admin123456)
-- Swagger API: <http://localhost:8000/api/docs>
-- ChirpStack: <http://localhost:8080>
-
-> El contenedor `frontend` sirve la build de producción y redirige `/api/*`
-> al backend interno, así que no necesita `VITE_API_URL` del navegador.
+> El seed regenera 48 h de histórico legacy: para quedarte solo con telemetría nueva,
+> `DELETE FROM measurements` + refresco de agregados (ver §9).
 
 ### 4.2. Desarrollo local (frontend + backend + simulador por separado)
 
@@ -506,6 +509,9 @@ roles `admin|operator|viewer` (`shared/guards/`).
 | GET | `/api/v1/devices/latest` | auth | Últimas métricas compactas |
 | GET/POST/PATCH/DELETE | `/api/v1/devices[/:id]` | ver/＋admin,operator/＋admin | CRUD sensores |
 | PATCH | `/api/v1/devices/:id/visibility` | **admin** | Mostrar/ocultar en Dashboard y mapas (`{visible}`; no toca ingesta) |
+| GET/PUT | `/api/v1/sim/state` | **admin** | Interruptor + frecuencia (ms) del simulador gestionable |
+| GET/POST | `/api/v1/sim/sensors` | **admin** | Listar / crear sensores virtuales (DevEUI vacío = autogenerado) |
+| PATCH/DELETE | `/api/v1/sim/sensors/:id` | **admin** | Editar (datos, umbrales, anomalías) / eliminar sensor virtual |
 | GET | `/api/v1/devices/:id/measurements` | auth | Histórico agregado (`telemetry/`) |
 | GET | `/api/v1/devices/:id/export/csv` | auth | Descarga CSV |
 | GET/POST/PATCH/DELETE | `/api/v1/alert-rules[/:id]` | ver/＋admin,operator/＋admin | Reglas (`alerts/`) |
@@ -525,10 +531,11 @@ Scripts (`backend/package.json`): `start:dev` (API con recarga), `start:worker`
 ## 9. Simulador de sensores
 
 Sin hardware: `simulator/mock-lora-devices.js` (Node + `mqtt`) publica eventos
-ChirpStack v4 en `application/1/device/<devEui>/event/up` con 5 ubicaciones
-reales de Galicia, deriva de batería (3.85 V → mín. 2.9 V), RSSI/SNR realistas
-y anomalías programadas para probar la histéresis. Detalle completo en
-`simulator/readme.md`.
+ChirpStack v4 en `application/1/device/<devEui>/event/up` para la red fija de
+**3 sensores CORNEA** (Sionlla, Castiñeiras, Aloia; mismos DevEUI que el seed),
+con deriva de batería, RSSI/SNR realistas y **1 mensaje anómalo cada 20**
+por sensor con régimen (01 aviso >85 %, 02 alarma <15 %, 03 normal).
+Detalle completo en `simulator/readme.md`.
 
 ```powershell
 cd simulator
@@ -554,18 +561,11 @@ node mock-lora-devices.js --count 20 --interval 10000 --url mqtt://<broker>:1883
 > la primera ráfaga en vivo y luego 1 mensaje/sonda/ciclo. Gráfica y tarjeta
 > N_raw se rellenan solas al levantar el stack (idempotente por la unicidad
 > `(device_id, time)` + timestamps en rejilla).
->
-> **Motor de escenarios** (ciclo determinista de 10 ticks, fase desplazada
-> por sensor para no solapar aviso y alarma): sonda 1 → episodio
-> `86-89 %` (dispara `humidity >= 85` warning), sonda 2 → episodio
-> `12-14 %` (dispara `humidity <= 15` critical), resto siempre normal
-> `35-70 %`. Episodios de 3 ticks para superar `duration_seconds` y la
-> histéresis. **Física cerrada**: `N_raw = ratio·N0/fp(P_sensor)` con
-> `fp = exp((P0-P)/L)` de `calibration_config.json`, así el θ que calcula
-> el backend coincide con el objetivo (a más N, menos humedad).
+> **Motor de escenarios (1 anómalo cada 20)**: CORNEA 01 pica en `tick%20==0` (86-89 %, aviso), CORNEA 02 en `tick%20==10` (12-14 %, alarma), CORNEA 03 siempre normal (35-70 %).
+> El tick siguiente vuelve a normal y resuelve por histéresis. **Física cerrada**: `N_raw = ratio·N0/fp(P_sensor)`, así el θ del backend coincide (a más N, menos humedad).
 >
 > Variables del script: `MQTT_URL` (def. `mqtt://localhost:1883`),
-> `MQTT_USERNAME`, `MQTT_PASSWORD`, `SENSOR_COUNT` (5), `INTERVAL_MS`
+> `MQTT_USERNAME`, `MQTT_PASSWORD`, `SENSOR_COUNT` (3, red fija), `INTERVAL_MS`
 > (1800000 = 30 min), `INJECT_ANOMALIES` (true), `NEUTRON_MODE` (true),
 > `SIM_BACKFILL` (10), o flags `--url/--user/--pass/--count/--interval/
 > --anomalies/--neutrons/--no-neutrons/--backfill` (el env manda sobre CLI).
@@ -576,7 +576,7 @@ En el `.env` raíz (ya cableadas al servicio `simulator`):
 
 | Variable `.env` | Defecto | Efecto |
 |---|---|---|
-| `SIM_SENSOR_COUNT` | `5` | Nº de sondas simuladas |
+| `SIM_SENSOR_COUNT` | `3` | Red fija: valores >3 se ignoran con aviso |
 | `SIM_INTERVAL_MS` | `1800000` (30 min) | Cadencia de emisión; p. ej. `5000` para demo en vivo |
 | `SIM_ANOMALIES` | `true` | Episodios aviso/alarma (`false` = todo normal) |
 | `SIM_NEUTRON_MODE` | `true` | Enviar `neutron_counts` (el backend calcula θ) |
@@ -591,6 +591,13 @@ docker compose up -d simulator
 docker compose restart simulator
 docker compose logs --tail 20 simulator
 ```
+
+> El servicio `simulator` (terminal) está jubilado: en `docker-compose.yml`
+> lleva `profiles: ["sim-legacy"]` y con `up -d` normal **no arranca**.
+> La demo se controla desde Admin → Simulador de datos de prueba (los 3
+> CORNEA ya están importados con sus DevEUI). Parada manual:
+> `docker compose stop simulator`. Solo para reanimar el legacy:
+> `docker compose --profile sim-legacy up -d simulator`.
 
 > Tras cambiar `.env` basta `up -d` del servicio (las variables se
 > inyectan al recrear el contenedor). Para volver a 30 min reales,
@@ -629,7 +636,15 @@ Ruta `/admin` (solo rol `admin`), `frontend/src/pages/AdminView.tsx`, en este or
 2. **Usuarios con Acceso** — tabla + **crear** (email, contraseña ≥ 6, rol,
    estado), **editar** (rol/estado/contraseña opcional) y **eliminar** (la
    cuenta propia está protegida).
-3. **Probador de Ingesta HTTP Gateway** — descrito arriba.
+3. **Herramientas de desarrollo** (interruptor único, ocultas por defecto):
+   **Probador de Ingesta HTTP Gateway** — descrito arriba.
+4. **Simulador de datos de prueba** — interruptor maestro + frecuencia
+   (segundos) + tabla de sensores virtuales con alta/edición/borrado y
+   activación individual. Al activar, el worker emite uplinks ChirpStack v4
+   por MQTT que la ingesta auto-aprovisiona como dispositivos (con su
+   nombre), calcula θ desde N_raw y dispara alertas/SSE como hardware real.
+   Sin terminales. Tablas `sim_state`/`sim_sensors` (migración 009,
+   autocreadas al arrancar).
 
 ---
 
@@ -676,11 +691,15 @@ Copiar `cp .env.example .env` y ajustar. Las más relevantes:
 
 ## 14. Notas conocidas
 
-- **Umbral de batería**: el seed histórico usa `battery_threshold = 20`
-  (pensado como **%**), mientras el backend compara voltios en crudo. El
-  frontend lo compensa (`> 15` ⇒ %; si no ⇒ V) y muestra el % estimado. Para
-  una corrección sistémica habría que unificar la semántica a % en
-  `devices.service.ts` + `alerts-engine.service.ts` y reconstruir la imagen.
+- **Umbral de batería** (corregido): `battery_threshold = 20` se interpreta
+  como **%** (umbrales `> 15` ⇒ %, `<= 15` ⇒ V) en los tres sitios a la vez:
+  `alerts-engine.service.ts`, `devices.service.ts` (SQL) y frontend
+  (`utils/battery.ts`). Antes el backend comparaba voltios contra 20 y todo
+  disparaba "batería baja" en cada uplink.
+- **Alertas duplicadas** (corregido): migración `008` + índice único parcial
+  `uq_active_alert_per_rule_device` + `ON CONFLICT DO NOTHING` en el motor;
+  el backend lo aplica solo al arrancar. `last_seen_at` es monótono
+  (`GREATEST`) para que las ráfagas concurrentes no marquen offline.
 - **Logo**: colocar `logo.png` (703×703, transparente) en `frontend/public/`.
 
 ---

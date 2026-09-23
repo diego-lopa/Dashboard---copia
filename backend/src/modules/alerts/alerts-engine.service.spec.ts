@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ConfigService } from '@nestjs/config';
 import { AlertsEngineService } from './alerts-engine.service';
 import { DatabaseService } from '../../database/database.service';
 import { RealtimeService } from '../realtime/realtime.service';
@@ -17,6 +18,9 @@ describe('AlertsEngineService (Hysteresis & Rules)', () => {
   const mockNotifications = {
     dispatchNotification: jest.fn(),
   };
+  const mockConfig = {
+    get: jest.fn().mockReturnValue(90),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -25,6 +29,7 @@ describe('AlertsEngineService (Hysteresis & Rules)', () => {
         { provide: DatabaseService, useValue: mockDb },
         { provide: RealtimeService, useValue: mockRealtime },
         { provide: NotificationsService, useValue: mockNotifications },
+        { provide: ConfigService, useValue: mockConfig },
       ],
     }).compile();
 
@@ -95,6 +100,70 @@ describe('AlertsEngineService (Hysteresis & Rules)', () => {
 
     expect(mockDb.query).not.toHaveBeenCalledWith(expect.stringContaining('UPDATE alert_events'), expect.anything());
     expect(mockRealtime.broadcastAlert).not.toHaveBeenCalled();
+  });
+
+  it('no debe disparar batería baja con 3.9 V y umbral 20 (se lee como 20 %)', async () => {
+    const mockDevice = { id: 'dev-1', tenant_id: 'tenant-1', name: 'Sensor 1', dev_eui: '0011223344556601' };
+    const mockRule = {
+      id: 'rule-batt',
+      name: 'Batería Baja',
+      metric: 'battery',
+      condition: '<=',
+      threshold: 20.0, // 3.9 V ≈ 75 % > 20 % → sin alerta
+      hysteresis: 1.0,
+      severity: 'warning',
+    };
+
+    mockDb.query.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT * FROM alert_rules')) {
+        return Promise.resolve({ rows: [mockRule] });
+      }
+      if (sql.includes('SELECT * FROM alert_events')) {
+        return Promise.resolve({ rows: [] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    await service.evaluateUplink(mockDevice, { devEui: '0011223344556601', battery: 3.9 });
+
+    expect(mockDb.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('INSERT INTO alert_events'),
+      expect.anything(),
+    );
+    expect(mockRealtime.broadcastAlert).not.toHaveBeenCalled();
+  });
+
+  it('debe disparar batería baja con 3.2 V y umbral 3.3 (voltios)', async () => {
+    const mockDevice = { id: 'dev-1', tenant_id: 'tenant-1', name: 'Sensor 1', dev_eui: '0011223344556601' };
+    const mockRule = {
+      id: 'rule-batt',
+      name: 'Batería Baja',
+      metric: 'battery',
+      condition: '<=',
+      threshold: 3.3, // <= 15 → voltios: 3.2 <= 3.3 → alerta
+      hysteresis: 0.1,
+      severity: 'warning',
+    };
+
+    mockDb.query.mockImplementation((sql: string) => {
+      if (sql.includes('SELECT * FROM alert_rules')) {
+        return Promise.resolve({ rows: [mockRule] });
+      }
+      if (sql.includes('SELECT * FROM alert_events')) {
+        return Promise.resolve({ rows: [] });
+      }
+      if (sql.includes('INSERT INTO alert_events')) {
+        return Promise.resolve({ rows: [{ id: 'event-9', triggered_at: new Date() }] });
+      }
+      return Promise.resolve({ rows: [] });
+    });
+
+    await service.evaluateUplink(mockDevice, { devEui: '0011223344556601', battery: 3.2 });
+
+    expect(mockRealtime.broadcastAlert).toHaveBeenCalledWith(
+      'dev-1',
+      expect.objectContaining({ state: 'triggered' }),
+    );
   });
 
   it('debe resolver la alerta cuando el valor cae por debajo del umbral menos la histéresis (< 77.0)', async () => {

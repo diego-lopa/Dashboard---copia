@@ -33,7 +33,7 @@ Este simulador emula el comportamiento de sensores IoT reales que se comunican m
 
 ## ⚡ Características
 
-- 🌍 **Sensores realistas**: Simula hasta 100+ dispositivos con ubicaciones en Galicia (Pontevedra y Santiago)
+- 🌍 **Red fija de 3 sensores CORNEA** con ubicaciones en Galicia (Sionlla, Castiñeiras, Aloia)
 - 📊 **Datos variables**: Genera fluctuaciones naturales en temperatura, humedad y batería
 - 🚨 **Inyección de anomalías**: Modo para probar sistemas de detección de fallos
 - 🔄 **Intervalos configurables**: Desde milisegundos (testing) hasta 30 minutos (producción, como las sondas físicas)
@@ -245,21 +245,22 @@ neutron_counts = nMean + gauss()*sqrt(nMean)    // ruido Poisson
 
 #### 4.2 Inyección de Anomalías (si `--anomalies` está activo)
 
-**Motor determinista (ciclo de 10 ticks: 6 normal → 3 anomalía → 1 recuperación,
-fase desplazada por sensor para no solapar aviso y alarma):**
+**Excepcionales: 1 mensaje anómalo cada 20 por sensor con régimen**
+(CORNEA 01 en `tick%20==0`, CORNEA 02 en `tick%20==10`: nunca el mismo ciclo;
+el tick siguiente vuelve a normal y resuelve por histéresis):
 
-**Sonda 1 (régimen `warning-high`):**
-- Durante 3 ticks: humedad objetivo **86-89%** (dispara la regla `humidity >= 85`, warning)
-- Luego vuelve a **65.2%** (resuelve por histéresis, que exige bajar de 82%)
+**CORNEA 01 (régimen `warning-high`):**
+- 1 tick: humedad objetivo **86-89%** (regla `humidity >= 85`, warning)
 
-**Sonda 2 (régimen `critical-low`):**
-- Durante 3 ticks: humedad objetivo **12-14%** (dispara `humidity <= 15`, critical)
-- Luego vuelve a **~45-50%** (resuelve por histéresis, que exige subir de 18%)
+**CORNEA 02 (régimen `critical-low`):**
+- 1 tick: humedad objetivo **12-14%** (regla `humidity <= 15`, critical)
 
-**Resto:** siempre normal (`35-70%`).
+**CORNEA 03:** siempre normal (`35-70%`).
 
-**Propósito:** Probar la **histéresis** del sistema de alertas (disparo y resolución automática).
-Los episodios duran 3 ticks para superar `duration_seconds=300` de las reglas seed.
+**Propósito:** excursiones excepcionales visibles en gráfica y raw.
+NOTA: el backend suaviza θ con EMA (α=0.3 anti-Poisson), así que el pico
+aislado solo dispara evento si el suavizado cruza el umbral (el motor
+`alerts-engine.service.ts` dispara inmediato al breach, sin exigir duración).
 
 #### 4.3 Codificación del Payload
 
@@ -411,7 +412,7 @@ Bytes: `[0x02, 0xAC, 0x00, 0xE7, 0x0F, 0x08]`
 | `npm run simulate:anomalies` | Testing de alertas | 5 min | 5 | ✅ |
 | `npm run simulate:fast` | Desarrollo/Debug | 5 seg | 5 | ✅ |
 | `npm run simulate:neutrons` | Modo CRNS (θ desde N_raw en backend) | 5 seg | 5 | ✅ |
-| `npm run load-test` | Prueba de carga | 2 seg | 100 | ❌ |
+| `npm run load-test` | Ráfaga de los 3 CORNEA | 2 seg | 3 | ✅ |
 
 ### Argumentos CLI
 
@@ -420,7 +421,7 @@ Bytes: `[0x02, 0xAC, 0x00, 0xE7, 0x0F, 0x08]`
 | `--url` | `MQTT_URL` | String | `mqtt://localhost:1883` | URL del broker MQTT |
 | `--user` | `MQTT_USERNAME` | String | `iot` | Usuario MQTT |
 | `--pass` | `MQTT_PASSWORD` | String | `changeme` | Contraseña MQTT |
-| `--count` | `SENSOR_COUNT` | Integer | `5` | Número de sensores a simular |
+| `--count` | `SENSOR_COUNT` | Integer | `3` | Red fija CORNEA: valores >3 se ignoran con aviso |
 | `--interval` | `INTERVAL_MS` | Integer | `1800000` (30 min) | Intervalo en ms entre envíos (acelerar tiempo con valores bajos) |
 | `--anomalies` | `INJECT_ANOMALIES` | Flag | `true` | Episodios aviso/alarma (`INJECT_ANOMALIES=false` los desactiva) |
 | `--neutrons` | `NEUTRON_MODE` | Flag | `true` | Modo CRNS: envía `neutron_counts` (N_raw con ruido Poisson ~sqrt(N), acoplado a la presión del sensor) y el backend calcula θ con el modelo Geant4 (`cornea_pipeline/config/calibration_config.json`, N₀=143.0) |
@@ -509,13 +510,11 @@ mqtt sub -t 'application/1/device/+/event/up' -h localhost
 
 ## 🌐 Ubicaciones de Sensores Simulados
 
-El simulador incluye 5 ubicaciones reales en Galicia:
+La red fija incluye 3 sensores CORNEA (mismos DevEUI/nombre que el seed):
 
-1. **Lago de Castiñeiras (Pontevedra)** - 42.3486, -8.6747
-2. **Estación Ambiental - Lago de Castiñeiras** - 42.3495, -8.6738
-3. **Polígono da Sionlla (Santiago)** - 42.9135, -8.5132
-4. **Polígono da Sionlla (Santiago)** - 42.9142, -8.5120
-5. **Monte Aloia (Pontevedra)** - 42.0682, -8.6750
+1. **CORNEA 01 - Polígono da Sionlla (Santiago)** - 42.910917, -8.491110 (`...6601`, régimen aviso)
+2. **CORNEA 02 - Lago de Castiñeiras (Pontevedra)** - 42.3486, -8.6747 (`...6602`, régimen alarma)
+3. **CORNEA 03 - Monte Aloia, Tui (Pontevedra)** - 42.0682, -8.6750 (`...6603`, siempre normal)
 
 ---
 

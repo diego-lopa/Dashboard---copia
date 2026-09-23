@@ -19,6 +19,9 @@ import {
   Edit2,
   Trash2,
   X,
+  Bot,
+  Play,
+  Pause,
 } from 'lucide-react';
 
 interface PlatformUser {
@@ -86,7 +89,8 @@ export const AdminView: React.FC = () => {
   const [mqttLatency, setMqttLatency] = useState<number | null>(null);
   const [mqttHost, setMqttHost] = useState<string | null>(null);
 
-  // ── Tester de ingesta ─────────────────────────────────────
+  // ── Herramientas de desarrollo (ocultas por defecto tras un único interruptor) ──
+  const [showDevTools, setShowDevTools] = useState(false);
   const [devices, setDevices] = useState<Device[]>([]);
   const [devEui, setDevEui] = useState('0011223344556601');
   const [format, setFormat] = useState<'chirpstack' | 'simple'>('chirpstack');
@@ -102,6 +106,205 @@ export const AdminView: React.FC = () => {
   const [sending, setSending] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // ── Simulador gestionable ─────────────────────────────────
+  interface SimSensor {
+    id: string;
+    name: string;
+    dev_eui: string;
+    base_humidity: number;
+    base_temp: number;
+    base_battery: number;
+    base_pressure: number;
+    latitude?: number | null;
+    longitude?: number | null;
+    anomaly_mode: 'none' | 'high' | 'low';
+    anomaly_every: number;
+    humidity_min_threshold: number;
+    humidity_max_threshold: number;
+    battery_threshold: number;
+    enabled: boolean;
+    tick?: number;
+  }
+  const SIM_DEFAULTS = {
+    name: '', devEui: '', baseHumidity: '55', baseTemp: '19', baseBattery: '3.9',
+    basePressure: '1012', latitude: '', longitude: '', anomalyMode: 'none',
+    anomalyEvery: '20', humidityMin: '15', humidityMax: '85', batteryThreshold: '20',
+    enabled: true,
+  };
+  const [simState, setSimState] = useState({ enabled: false, interval_ms: 30000 });
+  const [simIntervalSec, setSimIntervalSec] = useState('30');
+  const [simSensors, setSimSensors] = useState<SimSensor[]>([]);
+  const [simLoading, setSimLoading] = useState(true);
+  const [simSaving, setSimSaving] = useState(false);
+  const [simError, setSimError] = useState<string | null>(null);
+  const [simNotice, setSimNotice] = useState<string | null>(null);
+  const [isSimModalOpen, setIsSimModalOpen] = useState(false);
+  const [editingSim, setEditingSim] = useState<SimSensor | null>(null);
+  const [simForm, setSimForm] = useState({ ...SIM_DEFAULTS });
+  const [savingSim, setSavingSim] = useState(false);
+  const [simFormError, setSimFormError] = useState<string | null>(null);
+  const [deleteSimTarget, setDeleteSimTarget] = useState<SimSensor | null>(null);
+  const [deletingSim, setDeletingSim] = useState(false);
+  const [deleteSimError, setDeleteSimError] = useState<string | null>(null);
+
+  const loadSim = async () => {
+    setSimLoading(true);
+    setSimError(null);
+    try {
+      const [stRes, seRes] = await Promise.all([
+        apiClient.get('/sim/state'),
+        apiClient.get('/sim/sensors'),
+      ]);
+      setSimState({ enabled: !!stRes.data?.enabled, interval_ms: Number(stRes.data?.interval_ms) || 30000 });
+      setSimIntervalSec(String(Math.round((Number(stRes.data?.interval_ms) || 30000) / 1000)));
+      setSimSensors(Array.isArray(seRes.data) ? seRes.data : []);
+    } catch (err: any) {
+      setSimError(err?.response?.data?.message || t('test_error'));
+    } finally {
+      setSimLoading(false);
+    }
+  };
+
+  const handleSimToggle = async () => {
+    const next = !simState.enabled;
+    setSimSaving(true);
+    setSimError(null);
+    try {
+      const res = await apiClient.put('/sim/state', { enabled: next });
+      setSimState({ enabled: !!res.data?.enabled, interval_ms: Number(res.data?.interval_ms) || 30000 });
+      setSimNotice(null);
+    } catch (err: any) {
+      setSimError(err?.response?.data?.message || t('test_error'));
+    } finally {
+      setSimSaving(false);
+    }
+  };
+
+  const handleSimIntervalSave = async () => {
+    const sec = Math.max(2, Math.round(Number(simIntervalSec) || 30));
+    setSimSaving(true);
+    setSimError(null);
+    try {
+      const res = await apiClient.put('/sim/state', { intervalMs: sec * 1000 });
+      setSimState({ enabled: !!res.data?.enabled, interval_ms: Number(res.data?.interval_ms) || 30000 });
+      setSimIntervalSec(String(sec));
+      setSimNotice(t('sim_interval_saved'));
+    } catch (err: any) {
+      setSimError(err?.response?.data?.message || t('test_error'));
+    } finally {
+      setSimSaving(false);
+    }
+  };
+
+  const openCreateSim = () => {
+    setEditingSim(null);
+    setSimForm({ ...SIM_DEFAULTS });
+    setSimFormError(null);
+    setIsSimModalOpen(true);
+  };
+
+  const openEditSim = (s: SimSensor) => {
+    setEditingSim(s);
+    setSimForm({
+      name: s.name,
+      devEui: s.dev_eui,
+      baseHumidity: String(s.base_humidity),
+      baseTemp: String(s.base_temp),
+      baseBattery: String(s.base_battery),
+      basePressure: String(s.base_pressure),
+      latitude: s.latitude ?? '' as any,
+      longitude: s.longitude ?? '' as any,
+      anomalyMode: s.anomaly_mode,
+      anomalyEvery: String(s.anomaly_every),
+      humidityMin: String(s.humidity_min_threshold),
+      humidityMax: String(s.humidity_max_threshold),
+      batteryThreshold: String(s.battery_threshold),
+      enabled: !!s.enabled,
+    });
+    setSimFormError(null);
+    setIsSimModalOpen(true);
+  };
+
+  const simNum = (v: string, fallback: number) => {
+    const n = Number(v);
+    return String(v).trim() === '' || Number.isNaN(n) ? fallback : n;
+  };
+
+  const handleSaveSim = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSimFormError(null);
+    setSavingSim(true);
+    try {
+      if (editingSim) {
+        const payload: any = {
+          name: simForm.name.trim(),
+          baseHumidity: simNum(simForm.baseHumidity, 55),
+          baseTemp: simNum(simForm.baseTemp, 19),
+          baseBattery: simNum(simForm.baseBattery, 3.9),
+          basePressure: simNum(simForm.basePressure, 1012),
+          anomalyMode: simForm.anomalyMode,
+          anomalyEvery: Math.max(2, Math.round(simNum(simForm.anomalyEvery, 20))),
+          humidityMinThreshold: simNum(simForm.humidityMin, 15),
+          humidityMaxThreshold: simNum(simForm.humidityMax, 85),
+          batteryThreshold: simNum(simForm.batteryThreshold, 20),
+          enabled: simForm.enabled,
+        };
+        if (String(simForm.latitude).trim() !== '') payload.latitude = simNum(String(simForm.latitude), 0);
+        if (String(simForm.longitude).trim() !== '') payload.longitude = simNum(String(simForm.longitude), 0);
+        await apiClient.patch(`/sim/sensors/${editingSim.id}`, payload);
+      } else {
+        const payload: any = {
+          name: simForm.name.trim(),
+          baseHumidity: simNum(simForm.baseHumidity, 55),
+          baseTemp: simNum(simForm.baseTemp, 19),
+          baseBattery: simNum(simForm.baseBattery, 3.9),
+          basePressure: simNum(simForm.basePressure, 1012),
+          anomalyMode: simForm.anomalyMode,
+          anomalyEvery: Math.max(2, Math.round(simNum(simForm.anomalyEvery, 20))),
+          humidityMinThreshold: simNum(simForm.humidityMin, 15),
+          humidityMaxThreshold: simNum(simForm.humidityMax, 85),
+          batteryThreshold: simNum(simForm.batteryThreshold, 20),
+          enabled: simForm.enabled,
+        };
+        if (simForm.devEui.trim() !== '') payload.devEui = simForm.devEui.trim().toUpperCase();
+        if (String(simForm.latitude).trim() !== '') payload.latitude = simNum(String(simForm.latitude), 0);
+        if (String(simForm.longitude).trim() !== '') payload.longitude = simNum(String(simForm.longitude), 0);
+        await apiClient.post('/sim/sensors', payload);
+      }
+      setIsSimModalOpen(false);
+      await loadSim();
+    } catch (err: any) {
+      setSimFormError(err?.response?.data?.message || t('test_error'));
+    } finally {
+      setSavingSim(false);
+    }
+  };
+
+  const handleSimSensorToggle = async (s: SimSensor) => {
+    setSimError(null);
+    try {
+      await apiClient.patch(`/sim/sensors/${s.id}`, { enabled: !s.enabled });
+      await loadSim();
+    } catch (err: any) {
+      setSimError(err?.response?.data?.message || t('test_error'));
+    }
+  };
+
+  const handleDeleteSim = async () => {
+    if (!deleteSimTarget) return;
+    setDeletingSim(true);
+    setDeleteSimError(null);
+    try {
+      await apiClient.delete(`/sim/sensors/${deleteSimTarget.id}`);
+      setDeleteSimTarget(null);
+      await loadSim();
+    } catch (err: any) {
+      setDeleteSimError(err?.response?.data?.message || t('test_error'));
+    } finally {
+      setDeletingSim(false);
+    }
+  };
 
   const num = (v: string, fallback: number) => {
     const n = Number(v);
@@ -355,6 +558,7 @@ export const AdminView: React.FC = () => {
   useEffect(() => {
     loadUsers();
     checkServices();
+    loadSim();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -583,6 +787,33 @@ export const AdminView: React.FC = () => {
         )}
       </div>
 
+      {/* ── Herramientas de desarrollo: un único interruptor muestra/oculta ── */}
+      <div className={`glass-panel px-5 py-4 rounded-2xl border flex items-center justify-between gap-3 ${isDark ? 'border-white/[0.07]' : 'border-slate-200'}`}>
+        <div className="flex items-center gap-2">
+          <FlaskConical className="w-4 h-4 text-cyan-500" />
+          <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+            {t('dev_tools')}
+          </h3>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={showDevTools}
+          onClick={() => setShowDevTools((v) => !v)}
+          className={`relative w-10 h-[22px] rounded-full transition shrink-0 ${
+            showDevTools ? 'bg-emerald-500' : isDark ? 'bg-slate-700' : 'bg-slate-300'
+          }`}
+        >
+          <span
+            className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-all ${
+              showDevTools ? 'left-[22px]' : 'left-[3px]'
+            }`}
+          />
+        </button>
+      </div>
+
+      {showDevTools && (
+      <>
       {/* ── 3. Probador de ingesta ── */}
       <div className={`glass-panel p-5 rounded-2xl border ${isDark ? 'border-white/[0.07]' : 'border-slate-200'}`}>
         <div className="flex items-center gap-2 mb-1">
@@ -718,6 +949,183 @@ export const AdminView: React.FC = () => {
         </div>
       </div>
 
+      {/* ── 4. Simulador de datos de prueba ── */}
+      <div className={`glass-panel p-5 rounded-2xl border ${isDark ? 'border-white/[0.07]' : 'border-slate-200'}`}>
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-1">
+          <div className="flex items-center gap-2">
+            <Bot className="w-4 h-4 text-emerald-500" />
+            <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              {t('sim_manager_title')}
+            </h3>
+            <span
+              className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase ${
+                simState.enabled
+                  ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30'
+                  : isDark ? 'bg-slate-800 text-slate-400 border border-slate-700' : 'bg-slate-200 text-slate-600 border border-slate-300'
+              }`}
+            >
+              {simState.enabled ? t('status_online') : t('status_offline')}
+            </span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-2">
+              <label className={`text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                {t('sim_interval_label')}
+              </label>
+              <input
+                type="number"
+                min={2}
+                value={simIntervalSec}
+                onChange={(e) => setSimIntervalSec(e.target.value)}
+                className={`w-20 px-2 py-1.5 border rounded-xl text-xs focus:outline-none focus:border-emerald-500 ${
+                  isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                }`}
+              />
+              <button
+                type="button"
+                onClick={handleSimIntervalSave}
+                disabled={simSaving}
+                className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-xs transition disabled:opacity-50"
+              >
+                {t('sim_save_interval')}
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={handleSimToggle}
+              disabled={simSaving}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition disabled:opacity-50 ${
+                simState.enabled
+                  ? 'bg-amber-500/15 text-amber-500 border border-amber-500/30 hover:bg-amber-500/25'
+                  : 'bg-emerald-500 text-white hover:opacity-95 shadow-lg shadow-emerald-500/20'
+              }`}
+            >
+              {simState.enabled ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+              <span>{t('sim_enabled')}</span>
+            </button>
+            <button
+              type="button"
+              onClick={openCreateSim}
+              className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-xs flex items-center gap-1.5 transition"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{t('sim_add_sensor')}</span>
+            </button>
+          </div>
+        </div>
+        <p className={`text-[11px] mb-4 ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
+          {t('sim_manager_sub')}
+        </p>
+        {!simLoading && !simState.enabled && (
+          <div className="mb-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-600 dark:text-amber-400 text-xs">
+            {t('sim_off_hint')}
+          </div>
+        )}
+
+        {simError && (
+          <div className="mb-3 p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs">
+            {simError}
+          </div>
+        )}
+        {simNotice && (
+          <div className="mb-3 p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-600 dark:text-emerald-400 text-xs">
+            {simNotice}
+          </div>
+        )}
+
+        {simLoading ? (
+          <div className="flex items-center justify-center py-8">
+            <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : simSensors.length === 0 ? (
+          <p className={`text-xs py-6 text-center ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+            {t('sim_no_sensors')}
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className={`w-full text-left text-xs ${isDark ? 'text-slate-300' : 'text-slate-800'}`}>
+              <thead className={`uppercase text-[10px] tracking-wider border-b ${isDark ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
+                <tr>
+                  <th className="py-3 px-4">{t('rule_name')}</th>
+                  <th className="py-3 px-4">DevEUI</th>
+                  <th className="py-3 px-4">{t('sim_base_humidity')}</th>
+                  <th className="py-3 px-4">{t('sim_anomaly_mode')}</th>
+                  <th className="py-3 px-4">{t('sim_enabled_col')}</th>
+                  <th className="py-3 px-4 text-right">{t('actions')}</th>
+                </tr>
+              </thead>
+              <tbody className={`divide-y ${isDark ? 'divide-slate-800' : 'divide-slate-200'}`}>
+                {simSensors.map((s) => (
+                  <tr key={s.id} className={`transition ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
+                    <td className={`py-2.5 px-4 font-medium ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      {s.name}
+                      <span className={`block text-[10px] font-mono font-normal ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+                        {s.tick ?? 0} msgs
+                      </span>
+                    </td>
+                    <td className={`py-2.5 px-4 font-mono text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                      {s.dev_eui}
+                    </td>
+                    <td className="py-2.5 px-4">{Number(s.base_humidity)}%</td>
+                    <td className="py-2.5 px-4">
+                      {s.anomaly_mode === 'none'
+                        ? t('sim_anomaly_none')
+                        : s.anomaly_mode === 'high'
+                        ? `${t('sim_anomaly_high')} (${s.anomaly_every})`
+                        : `${t('sim_anomaly_low')} (${s.anomaly_every})`}
+                    </td>
+                    <td className="py-2.5 px-4">
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={!!s.enabled}
+                        onClick={() => handleSimSensorToggle(s)}
+                        className={`relative w-10 h-[22px] rounded-full transition shrink-0 ${
+                          s.enabled ? 'bg-emerald-500' : isDark ? 'bg-slate-700' : 'bg-slate-300'
+                        }`}
+                      >
+                        <span className={`absolute top-[3px] w-4 h-4 rounded-full bg-white shadow transition-all ${s.enabled ? 'left-[22px]' : 'left-[3px]'}`} />
+                      </button>
+                    </td>
+                    <td className="py-2.5 px-4 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => openEditSim(s)}
+                          title={t('edit_user')}
+                          className={`p-1.5 rounded-lg border transition ${
+                            isDark
+                              ? 'bg-slate-900 hover:bg-cyan-500/20 text-slate-400 hover:text-cyan-400 border-slate-700'
+                              : 'bg-slate-100 hover:bg-cyan-100 text-slate-600 hover:text-cyan-700 border-slate-300'
+                          }`}
+                        >
+                          <Edit2 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setDeleteSimError(null);
+                            setDeleteSimTarget(s);
+                          }}
+                          title={t('delete_user')}
+                          className={`p-1.5 rounded-lg border transition ${
+                            isDark
+                              ? 'bg-slate-900 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border-slate-700'
+                              : 'bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 border-slate-300'
+                          }`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      </>
+      )}
+
       {/* ── Modal crear / editar usuario ── */}
       {isUserModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
@@ -850,6 +1258,163 @@ export const AdminView: React.FC = () => {
               >
                 <Trash2 className="w-4 h-4" />
                 <span>{deletingUser ? '…' : t('delete_user')}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal crear / editar sensor virtual */}
+      {isSimModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-lg rounded-3xl p-6 border shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'}`}>
+            <div className={`flex items-center justify-between border-b pb-3 ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <h3 className={`font-bold text-base ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                {editingSim ? t('sim_edit_sensor') : t('sim_new_sensor')}
+              </h3>
+              <button onClick={() => setIsSimModalOpen(false)} className={`p-1 ${isDark ? 'text-slate-400 hover:text-white' : 'text-slate-500 hover:text-slate-900'}`}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {simFormError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs">
+                {simFormError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveSim} className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="col-span-2">
+                  <label className={labelCls(isDark)}>{t('rule_name')}</label>
+                  <input
+                    type="text" required value={simForm.name}
+                    onChange={(e) => setSimForm({ ...simForm, name: e.target.value })}
+                    placeholder="CORNEA Demo 01" className={inputCls(isDark)}
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className={labelCls(isDark)}>DevEUI ({t('optional')})</label>
+                  <input
+                    type="text" value={simForm.devEui} disabled={!!editingSim}
+                    onChange={(e) => setSimForm({ ...simForm, devEui: e.target.value })}
+                    placeholder={t('dev_eui_placeholder')} className={`${inputCls(isDark)} font-mono disabled:opacity-50`}
+                  />
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('sim_base_humidity')}</label>
+                  <input type="number" step="any" value={simForm.baseHumidity} onChange={(e) => setSimForm({ ...simForm, baseHumidity: e.target.value })} className={inputCls(isDark)} />
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('sim_base_temp')}</label>
+                  <input type="number" step="any" value={simForm.baseTemp} onChange={(e) => setSimForm({ ...simForm, baseTemp: e.target.value })} className={inputCls(isDark)} />
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('sim_base_battery')}</label>
+                  <input type="number" step="any" value={simForm.baseBattery} onChange={(e) => setSimForm({ ...simForm, baseBattery: e.target.value })} className={inputCls(isDark)} />
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('sim_base_pressure')}</label>
+                  <input type="number" step="any" value={simForm.basePressure} onChange={(e) => setSimForm({ ...simForm, basePressure: e.target.value })} className={inputCls(isDark)} />
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('latitude')}</label>
+                  <input type="number" step="any" value={simForm.latitude} onChange={(e) => setSimForm({ ...simForm, latitude: e.target.value })} placeholder="42.3486" className={inputCls(isDark)} />
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('longitude')}</label>
+                  <input type="number" step="any" value={simForm.longitude} onChange={(e) => setSimForm({ ...simForm, longitude: e.target.value })} placeholder="-8.6747" className={inputCls(isDark)} />
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('sim_anomaly_mode')}</label>
+                  <select value={simForm.anomalyMode} onChange={(e) => setSimForm({ ...simForm, anomalyMode: e.target.value as any })} className={inputCls(isDark)}>
+                    <option value="none">{t('sim_anomaly_none')}</option>
+                    <option value="high">{t('sim_anomaly_high')}</option>
+                    <option value="low">{t('sim_anomaly_low')}</option>
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('sim_every')}</label>
+                  <input type="number" min={2} value={simForm.anomalyEvery} onChange={(e) => setSimForm({ ...simForm, anomalyEvery: e.target.value })} className={inputCls(isDark)} />
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('sim_humidity_min')}</label>
+                  <input type="number" step="any" value={simForm.humidityMin} onChange={(e) => setSimForm({ ...simForm, humidityMin: e.target.value })} className={inputCls(isDark)} />
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('sim_humidity_max')}</label>
+                  <input type="number" step="any" value={simForm.humidityMax} onChange={(e) => setSimForm({ ...simForm, humidityMax: e.target.value })} className={inputCls(isDark)} />
+                </div>
+                <div>
+                  <label className={labelCls(isDark)}>{t('sim_battery_threshold')}</label>
+                  <input type="number" step="any" value={simForm.batteryThreshold} onChange={(e) => setSimForm({ ...simForm, batteryThreshold: e.target.value })} className={inputCls(isDark)} />
+                </div>
+                <div className="flex items-end pb-2">
+                  <label className={`flex items-center gap-2 text-xs cursor-pointer ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+                    <input
+                      type="checkbox" checked={simForm.enabled}
+                      onChange={(e) => setSimForm({ ...simForm, enabled: e.target.checked })}
+                      className="w-4 h-4 accent-emerald-500"
+                    />
+                    {t('sim_enabled_col')}
+                  </label>
+                </div>
+              </div>
+              <div className={`flex items-center justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button
+                  type="button" onClick={() => setIsSimModalOpen(false)}
+                  className={`px-4 py-2 rounded-xl border text-xs font-medium transition ${
+                    isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  {t('cancel')}
+                </button>
+                <button
+                  type="submit" disabled={savingSim}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 text-white font-semibold text-xs shadow-lg shadow-emerald-500/20 transition flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{editingSim ? t('update_user_btn') : t('sim_add_sensor')}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmar borrado de sensor virtual */}
+      {deleteSimTarget && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl space-y-4 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-rose-500/15 text-rose-500 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{t('sim_delete_title')}</h3>
+                <p className={`text-xs mt-0.5 truncate ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>"{deleteSimTarget.name}"</p>
+              </div>
+            </div>
+            {deleteSimError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-500 text-xs">
+                {deleteSimError}
+              </div>
+            )}
+            <div className={`flex items-center justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <button
+                type="button" onClick={() => setDeleteSimTarget(null)}
+                className={`px-4 py-2 rounded-xl border text-xs font-medium transition ${
+                  isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="button" onClick={handleDeleteSim} disabled={deletingSim}
+                className="px-4 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-semibold text-xs shadow-lg shadow-rose-500/20 transition flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>{deletingSim ? '…' : t('delete_user')}</span>
               </button>
             </div>
           </div>

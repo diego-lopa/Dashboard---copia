@@ -40,6 +40,14 @@ export const DeviceDetail: React.FC = () => {
   const [timeRange, setTimeRange] = useState<string>('24h');
   const interval = 'raw';
 
+  // Unidad de presión (hPa/atm): solo presentación, se calcula al hacer clic,
+  // no se almacena nada doble en BD. 1 atm = 1013.25 hPa.
+  const [pressureUnit, setPressureUnit] = useState<'hPa' | 'atm'>('hPa');
+  const fmtPressure = (hpa?: number | null): string => {
+    if (hpa === undefined || hpa === null || Number.isNaN(hpa)) return '--';
+    return pressureUnit === 'hPa' ? `${hpa} hPa` : `${(hpa / 1013.25).toFixed(4)} atm`;
+  };
+
   const handleRangeChange = (range: string) => {
     setTimeRange(range);
   };
@@ -106,6 +114,7 @@ export const DeviceDetail: React.FC = () => {
               latest_humidity: event.data.humidity ?? prev.latest_humidity,
               latest_temperature: event.data.temperature ?? prev.latest_temperature,
               latest_battery: event.data.battery ?? prev.latest_battery,
+              latest_pressure: event.data.pressure ?? prev.latest_pressure,
               latest_rssi: event.data.rssi ?? prev.latest_rssi,
               latest_snr: event.data.snr ?? prev.latest_snr,
               latest_neutron_counts: event.data.neutron_counts ?? prev.latest_neutron_counts,
@@ -190,7 +199,7 @@ export const DeviceDetail: React.FC = () => {
             </p>
             {(device as any).pressure !== undefined && (device as any).pressure !== null && (
               <p className={`text-[11px] mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                {t('pressure_label')}: {(device as any).pressure} hPa {t('pressure_ref_note')}
+                {t('pressure_label')}: {(device as any).pressure} hPa
               </p>
             )}
           </div>
@@ -282,29 +291,30 @@ export const DeviceDetail: React.FC = () => {
           )}
         </div>
 
-        {/* Presión */}
+        {/* Presión (clic en el valor: hPa ⇄ atm, cálculo local sin doble registro) */}
         <div className="glass-card p-3.5 rounded-2xl border">
           <div className="flex items-center justify-between mb-1">
             <span className={`text-[11px] font-medium ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
               {t('pressure_label')}
             </span>
-            <span className="w-4 h-4 rounded-full bg-sky-500/20 text-sky-500 flex items-center justify-center text-[10px] font-bold">
-              hPa
+            <span className="px-1.5 rounded-full bg-sky-500/20 text-sky-500 flex items-center justify-center text-[10px] font-bold">
+              {pressureUnit}
             </span>
           </div>
-          <p className="text-xl font-bold text-sky-500">
+          <button
+            type="button"
+            onClick={() => setPressureUnit((u) => (u === 'hPa' ? 'atm' : 'hPa'))}
+            title={t('pressure_toggle_hint')}
+            className="text-xl font-bold text-sky-500 hover:opacity-80 transition cursor-pointer"
+          >
             {device.latest_pressure !== undefined && device.latest_pressure !== null
-              ? `${device.latest_pressure} hPa`
+              ? fmtPressure(device.latest_pressure)
               : (device as any).pressure !== undefined && (device as any).pressure !== null
-              ? `${(device as any).pressure} hPa`
+              ? fmtPressure((device as any).pressure)
               : '--'}
-          </p>
+          </button>
           <p className={`text-[10px] mt-1 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-            {device.latest_pressure !== undefined && device.latest_pressure !== null
-              ? t('pressure_live')
-              : (device as any).pressure !== undefined && (device as any).pressure !== null
-              ? `${t('pressure_ref_note')} · ${(device as any).pressure} hPa`
-              : '--'}
+            {t('pressure_toggle_hint')}
           </p>
         </div>
 
@@ -435,7 +445,14 @@ export const DeviceDetail: React.FC = () => {
                     {row.avg_battery ?? row.battery ?? '--'}V
                   </td>
                   <td className={`py-2 px-4 ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
-                    {row.avg_pressure ?? row.pressure ?? '--'} hPa
+                    <button
+                      type="button"
+                      onClick={() => setPressureUnit((u) => (u === 'hPa' ? 'atm' : 'hPa'))}
+                      title={t('pressure_toggle_hint')}
+                      className="hover:opacity-80 transition cursor-pointer whitespace-nowrap"
+                    >
+                      {fmtPressure(row.avg_pressure ?? row.pressure)}
+                    </button>
                   </td>
                   <td className="py-2 px-4 text-cyan-500 font-medium">
                     {row.avg_rssi ?? row.rssi ?? '--'} dBm
