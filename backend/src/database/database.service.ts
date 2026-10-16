@@ -67,6 +67,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
            name VARCHAR(255) NOT NULL,
            dev_eui VARCHAR(32) UNIQUE NOT NULL,
            base_humidity DOUBLE PRECISION NOT NULL DEFAULT 55.0,
+           base_neutrons DOUBLE PRECISION NOT NULL DEFAULT 30.0,
            base_temp DOUBLE PRECISION NOT NULL DEFAULT 19.0,
            base_battery DOUBLE PRECISION NOT NULL DEFAULT 3.9,
            base_pressure DOUBLE PRECISION NOT NULL DEFAULT 1012.0,
@@ -85,6 +86,10 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       );
       await this.pool.query(
         'CREATE INDEX IF NOT EXISTS idx_sim_sensors_tenant ON sim_sensors(tenant_id, enabled)',
+      );
+      // Migración 010: escenario del simulador en neutrones (upgrade de volúmenes).
+      await this.pool.query(
+        'ALTER TABLE sim_sensors ADD COLUMN IF NOT EXISTS base_neutrons DOUBLE PRECISION NOT NULL DEFAULT 30.0',
       );
     } catch (err) {
       this.logger.warn(`No se pudieron asegurar tablas del simulador: ${err.message}`);

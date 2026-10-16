@@ -140,7 +140,7 @@ Todas las rutas son **relativas a la raíz** (sin dependencias de máquina):
     ├── package.json             # start (30 min), simulate:30min/5min/anomalies/fast/neutrons/load-test
     ├── mock-lora-devices.js     # Sensores virtuales → ChirpStack v4 JSON → MQTT
     │                            # (+ modo --neutrons: N_raw con ruido Poisson; intervalo vía
-    │                            # INTERVAL_MS/SENSOR_COUNT/NEUTRON_MODE/INJECT_ANOMALIES o flags CLI)
+│                            # INTERVAL_MS/SENSOR_COUNT/INJECT_ANOMALIES o flags CLI; mide N_raw
     └── readme.md                # Documentación propia del simulador
 ```
 
@@ -540,10 +540,9 @@ Detalle completo en `simulator/readme.md`.
 ```powershell
 cd simulator
 npm install
-npm run simulate:fast      # 5 sondas cada 5 s + anomalías (ideal para demo en local)
-npm run simulate:anomalies # 5 sondas cada 5 min + anomalías (test de alertas)
-npm run simulate:neutrons  # modo CRNS explícito (ya es el defecto)
-npm run load-test          # 100 sondas cada 2 s (carga)
+npm run simulate:fast      # 3 sensores CORNEA cada 5 s (demo en local)
+npm run simulate:anomalies # 3 sensores cada 5 min + excursiones (test de alertas)
+npm run load-test          # ráfaga de los 3 cada 2 s
 ```
 
 ```bash
@@ -551,24 +550,31 @@ npm run load-test          # 100 sondas cada 2 s (carga)
 node mock-lora-devices.js --count 20 --interval 10000 --url mqtt://<broker>:1883 --user iot --pass changeme
 ```
 
-> Desde la v2 el simulador envía **neutrones por defecto** (opt-out con
-> `--no-neutrons` o `NEUTRON_MODE=false`); si un uplink trae humedad sin N,
-> el backend estima N con la inversa Geant4. Con Docker no hace falta
-> arrancarlo a mano: el servicio `simulator` del compose (modo neutrónico +
-> anomalías cada 30 min, como las sondas físicas) envía al conectar un
-> **backfill de 10 muestras históricas** por sonda (ya con episodios, para
-> que la gráfica muestre normalidad + aviso + alarma desde el arranque),
-> la primera ráfaga en vivo y luego 1 mensaje/sonda/ciclo. Gráfica y tarjeta
-> N_raw se rellenan solas al levantar el stack (idempotente por la unicidad
-> `(device_id, time)` + timestamps en rejilla).
-> **Motor de escenarios (1 anómalo cada 20)**: CORNEA 01 pica en `tick%20==0` (86-89 %, aviso), CORNEA 02 en `tick%20==10` (12-14 %, alarma), CORNEA 03 siempre normal (35-70 %).
-> El tick siguiente vuelve a normal y resuelve por histéresis. **Física cerrada**: `N_raw = ratio·N0/fp(P_sensor)`, así el θ del backend coincide (a más N, menos humedad).
+> **Modelo físico (como una sonda CRNS real)**: el simulador **no manda humedad**.
+> Transmite solo el **recuento bruto de neutrones** (`neutron_counts`) y la presión de
+> esa sonda; la humedad volumétrica (θ) la calcula la **app** en el backend con el
+> modelo Geant4 (`payload-codec.service.ts` → `calculateMoistureFromNeutrons`):
+> `fp = exp((P0-P)/L)`, `N_corr = N·fp`, `θ = a0·e^(-a1·N_corr/N0)+a2`.
+> Relación inversa: **más N ⇔ menos humedad** (el agua absorbe neutrones).
+> El payload tampoco incluye binario de humedad; los umbrales y las reglas siguen
+> expresados en humedad (15-85 %), que es lo que la app evalúa.
+>
+> Con Docker no hace falta arrancarlo a mano: el servicio `simulator` del compose
+> envía al conectar un **backfill de 10 muestras históricas** por sonda (con
+> episodios), la primera ráfaga en vivo y luego 1 mensaje/sonda/ciclo cada 30 min.
+> Idempotente por la unicidad `(device_id, time)` + timestamps en rejilla.
+>
+> **Motor de escenarios en espacio N (1 excursión cada 20)**: CORNEA 01 baja a
+> `N≈8-10` en `tick%20==0` (→ θ 86-88 %, aviso), CORNEA 02 sube a `N≈102-110`
+> en `tick%20==10` (→ θ 12-14 %, alarma), CORNEA 03 siempre `N≈15-60`
+> (→ θ 30-72 %). El siguiente tick vuelve a normal y resuelve por histéresis.
+> NOTA: el backend suaviza θ con EMA (α=0.3 anti-Poisson), así que la excursión
+> aislada se ve en N pero solo dispara evento si el suavizado cruza el umbral.
 >
 > Variables del script: `MQTT_URL` (def. `mqtt://localhost:1883`),
 > `MQTT_USERNAME`, `MQTT_PASSWORD`, `SENSOR_COUNT` (3, red fija), `INTERVAL_MS`
-> (1800000 = 30 min), `INJECT_ANOMALIES` (true), `NEUTRON_MODE` (true),
-> `SIM_BACKFILL` (10), o flags `--url/--user/--pass/--count/--interval/
-> --anomalies/--neutrons/--no-neutrons/--backfill` (el env manda sobre CLI).
+> (1800000 = 30 min), `INJECT_ANOMALIES` (true), `SIM_BACKFILL` (10), o flags
+> `--url/--user/--pass/--count/--interval/--anomalies/--backfill` (env > CLI).
 
 ### Opciones en Docker (intervalo y nº de sensores sin tocar código)
 
@@ -578,8 +584,7 @@ En el `.env` raíz (ya cableadas al servicio `simulator`):
 |---|---|---|
 | `SIM_SENSOR_COUNT` | `3` | Red fija: valores >3 se ignoran con aviso |
 | `SIM_INTERVAL_MS` | `1800000` (30 min) | Cadencia de emisión; p. ej. `5000` para demo en vivo |
-| `SIM_ANOMALIES` | `true` | Episodios aviso/alarma (`false` = todo normal) |
-| `SIM_NEUTRON_MODE` | `true` | Enviar `neutron_counts` (el backend calcula θ) |
+| `SIM_ANOMALIES` | `true` | Excursiones de aviso/alarma (`false` = todo normal) |
 | `SIM_BACKFILL` | `10` | Muestras históricas por sonda al arrancar |
 
 ```powershell
@@ -675,8 +680,8 @@ Copiar `cp .env.example .env` y ajustar. Las más relevantes:
 | Pantalla en negro al llegar una alerta | (Corregido) El SSE enviaba claves `camelCase` y el formateo de fechas lanzaba sin red de seguridad | `utils/realtime.ts` normaliza el evento, `utils/dates.ts` nunca lanza y `components/ErrorBoundary.tsx` muestra panel de recuperación |
 | `Port 3000 is in use` en `npm run dev` | Otro proceso/contenedor ocupa el 3000 | `netstat -ano \| findstr :3000` y libera, o usa el puerto alternativo que propone Vite |
 | Página en blanco tras `npm run dev` | Faltaba el plugin React / módulos vacíos (ya corregido) | `npm install` + recargar; revisa la consola del navegador |
-| Tarjeta N_raw en `--` | No hay tráfico neutrónico reciente y tampoco histórico con N | El servicio `simulator` de Docker ya envía neutrones solo; en manual usar `simulate:neutrons`. Desde la v2 el simulador trae neutrones por defecto y el backend estima N si falta, así que todo registro nuevo es completo |
-| Dos simuladores a la vez mezclan tráficos | Un simulador en host (humedad) + el servicio `simulator` (neutrones) compiten: el `latest` salta de uno a otro y el EMA mezcla ambos | Quedarse con uno solo: detener el de host (Ctrl+C) o pasarlo a `--neutrons`. `latest_neutron_counts` devuelve el último N no nulo aunque el tráfico sea mixto |
+| Tarjeta N_raw en `--` | No hay tráfico reciente ni histórico con N | El simulador (Docker o admin) solo emite N; si el registro llega sin N, el backend lo estima con la inversa Geant4 |
+| Dos simuladores a la vez mezclan tráficos | Legacy `simulator` (terminal) + simulador gestionable del admin emiten a la vez: el `latest` salta de uno a otro y el EMA mezcla ambos | Quedarse con **uno solo**: `docker compose stop simulator` (el legacy está en perfil `sim-legacy` y no arranca con `up -d` normal) |
 | Login 401 / redirección a `/login` | Token caducado o backend caído | Comprueba `docker compose ps` y `:8000/health` |
 | Sin datos en tiempo real | Mosquitto caído o SSE bloqueado | Admin → Estado de servicios; `docker compose logs mosquitto backend-worker` |
 | Simulador `connack timeout` | Broker inaccesible / credenciales | Verifica `:1883`, `MQTT_USERNAME/PASSWORD` o flags `--user/--pass` |

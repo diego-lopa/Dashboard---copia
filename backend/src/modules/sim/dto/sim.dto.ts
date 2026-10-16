@@ -30,12 +30,12 @@ export class CreateSimSensorDto {
   @Matches(/^[0-9a-fA-F]{16}$/, { message: 'El DevEUI debe tener 16 caracteres hexadecimales' })
   devEui?: string;
 
-  @ApiPropertyOptional({ default: 55.0 })
+  @ApiPropertyOptional({ default: 30.0, description: 'Recuento base de neutrones N_raw (la humedad la calcula la app)' })
   @IsOptional()
   @IsNumber()
-  @Min(0)
-  @Max(100)
-  baseHumidity?: number;
+  @Min(5)
+  @Max(200)
+  baseNeutrons?: number;
 
   @ApiPropertyOptional({ default: 19.0 })
   @IsOptional()
@@ -107,11 +107,12 @@ export class UpdateSimSensorDto {
   @MaxLength(255)
   name?: string;
 
+  @ApiPropertyOptional({ default: 30.0, description: 'Recuento base de neutrones N_raw' })
   @IsOptional()
   @IsNumber()
-  @Min(0)
-  @Max(100)
-  baseHumidity?: number;
+  @Min(5)
+  @Max(200)
+  baseNeutrons?: number;
 
   @IsOptional()
   @IsNumber()

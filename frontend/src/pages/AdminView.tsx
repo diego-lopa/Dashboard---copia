@@ -112,7 +112,7 @@ export const AdminView: React.FC = () => {
     id: string;
     name: string;
     dev_eui: string;
-    base_humidity: number;
+    base_neutrons: number;
     base_temp: number;
     base_battery: number;
     base_pressure: number;
@@ -127,7 +127,7 @@ export const AdminView: React.FC = () => {
     tick?: number;
   }
   const SIM_DEFAULTS = {
-    name: '', devEui: '', baseHumidity: '55', baseTemp: '19', baseBattery: '3.9',
+    name: '', devEui: '', baseNeutrons: '30', baseTemp: '19', baseBattery: '3.9',
     basePressure: '1012', latitude: '', longitude: '', anomalyMode: 'none',
     anomalyEvery: '20', humidityMin: '15', humidityMax: '85', batteryThreshold: '20',
     enabled: true,
@@ -209,7 +209,7 @@ export const AdminView: React.FC = () => {
     setSimForm({
       name: s.name,
       devEui: s.dev_eui,
-      baseHumidity: String(s.base_humidity),
+      baseNeutrons: String(s.base_neutrons ?? 30),
       baseTemp: String(s.base_temp),
       baseBattery: String(s.base_battery),
       basePressure: String(s.base_pressure),
@@ -239,7 +239,7 @@ export const AdminView: React.FC = () => {
       if (editingSim) {
         const payload: any = {
           name: simForm.name.trim(),
-          baseHumidity: simNum(simForm.baseHumidity, 55),
+          baseNeutrons: simNum(simForm.baseNeutrons, 30),
           baseTemp: simNum(simForm.baseTemp, 19),
           baseBattery: simNum(simForm.baseBattery, 3.9),
           basePressure: simNum(simForm.basePressure, 1012),
@@ -256,7 +256,7 @@ export const AdminView: React.FC = () => {
       } else {
         const payload: any = {
           name: simForm.name.trim(),
-          baseHumidity: simNum(simForm.baseHumidity, 55),
+          baseNeutrons: simNum(simForm.baseNeutrons, 30),
           baseTemp: simNum(simForm.baseTemp, 19),
           baseBattery: simNum(simForm.baseBattery, 3.9),
           basePressure: simNum(simForm.basePressure, 1012),
@@ -1048,7 +1048,7 @@ export const AdminView: React.FC = () => {
                 <tr>
                   <th className="py-3 px-4">{t('rule_name')}</th>
                   <th className="py-3 px-4">DevEUI</th>
-                  <th className="py-3 px-4">{t('sim_base_humidity')}</th>
+                  <th className="py-3 px-4">{t('sim_base_neutrons')}</th>
                   <th className="py-3 px-4">{t('sim_anomaly_mode')}</th>
                   <th className="py-3 px-4">{t('sim_enabled_col')}</th>
                   <th className="py-3 px-4 text-right">{t('actions')}</th>
@@ -1066,7 +1066,7 @@ export const AdminView: React.FC = () => {
                     <td className={`py-2.5 px-4 font-mono text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                       {s.dev_eui}
                     </td>
-                    <td className="py-2.5 px-4">{Number(s.base_humidity)}%</td>
+                    <td className="py-2.5 px-4 text-indigo-400 font-medium">{Number(s.base_neutrons)}</td>
                     <td className="py-2.5 px-4">
                       {s.anomaly_mode === 'none'
                         ? t('sim_anomaly_none')
@@ -1302,8 +1302,8 @@ export const AdminView: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className={labelCls(isDark)}>{t('sim_base_humidity')}</label>
-                  <input type="number" step="any" value={simForm.baseHumidity} onChange={(e) => setSimForm({ ...simForm, baseHumidity: e.target.value })} className={inputCls(isDark)} />
+                  <label className={labelCls(isDark)}>{t('sim_base_neutrons')}</label>
+                  <input type="number" step="any" value={simForm.baseNeutrons} onChange={(e) => setSimForm({ ...simForm, baseNeutrons: e.target.value })} className={inputCls(isDark)} />
                 </div>
                 <div>
                   <label className={labelCls(isDark)}>{t('sim_base_temp')}</label>

@@ -9,12 +9,21 @@ import {
 import { ConfigService } from '@nestjs/config';
 import * as mqtt from 'mqtt';
 import { DatabaseService } from '../../database/database.service';
-import { PayloadCodecService } from '../ingestion/codecs/payload-codec.service';
 import { CreateSimSensorDto, UpdateSimSensorDto, UpdateSimStateDto } from './dto/sim.dto';
 
 const CONTROL_POLL_MS = 5000;
 const MIN_INTERVAL_MS = 2000;
 const MAX_INTERVAL_MS = 3600000;
+
+// Bandas de N_raw calibradas con cornea_pipeline/config/calibration_config.json
+// (N0=143, P0=981.4, L=137). La app traduce N → θ con Geant4:
+//   N 8-10   → θ 86-88 % → aviso  (regla humidity >= 85)
+//   N 102-110 → θ 12-14 % → alarma (regla humidity <= 15)
+//   N 15-60   → θ 30-72 % → normal (nunca dispara)
+// Ojo: humedad alta ⇔ conteo BAJO (los neutrones se absorben en el agua).
+const N_WET = [8, 10];
+const N_DRY = [102, 110];
+const N_NORMAL = [15, 60];
 
 /** Gaussiana estándar (Box-Muller) para ruido Poisson ~ sqrt(N). */
 function gauss(): number {
@@ -32,9 +41,11 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  * `sim_sensors` y el interruptor+frecuencia en `sim_state` (por tenant).
  * El bucle de emisión corre SOLO en el worker (mismo criterio que la
  * suscripción MQTT: si la API también emitiese, todo llegaría duplicado).
- * Cada uplink es un evento ChirpStack v4 real: la ingesta normal lo
- * auto-aprovisiona como dispositivo, calcula θ desde N_raw y dispara
- * alertas/SSE igual que con hardware físico.
+ *
+ * MODELO FÍSICO: cada uplink es un evento ChirpStack v4 real que lleva
+ * ÚNICAMENTE el recuento bruto de neutrones (N_raw) + entorno; la humedad la
+ * calcula el backend con el modelo Geant4 calibrado a partir de N y la presión
+ * de esa sonda. Igual que el hardware: la sonda no conoce su humedad.
  */
 @Injectable()
 export class SimService implements OnModuleInit, OnModuleDestroy {
@@ -46,7 +57,6 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly db: DatabaseService,
     private readonly configService: ConfigService,
-    private readonly codec: PayloadCodecService,
   ) {}
 
   onModuleInit() {
@@ -100,7 +110,7 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
     try {
       const res = await this.db.query(
         `INSERT INTO sim_sensors (
-           tenant_id, name, dev_eui, base_humidity, base_temp, base_battery, base_pressure,
+           tenant_id, name, dev_eui, base_neutrons, base_temp, base_battery, base_pressure,
            latitude, longitude, anomaly_mode, anomaly_every,
            humidity_min_threshold, humidity_max_threshold, battery_threshold, enabled
          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
@@ -109,7 +119,7 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
           tenantId,
           dto.name.trim(),
           devEui,
-          dto.baseHumidity ?? 55.0,
+          dto.baseNeutrons ?? 30.0,
           dto.baseTemp ?? 19.0,
           dto.baseBattery ?? 3.9,
           dto.basePressure ?? 1012.0,
@@ -140,7 +150,7 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
     const prev = cur.rows[0];
     const next = {
       name: dto.name?.trim() || prev.name,
-      base_humidity: dto.baseHumidity ?? Number(prev.base_humidity),
+      base_neutrons: dto.baseNeutrons ?? Number(prev.base_neutrons ?? 30),
       base_temp: dto.baseTemp ?? Number(prev.base_temp),
       base_battery: dto.baseBattery ?? Number(prev.base_battery),
       base_pressure: dto.basePressure ?? Number(prev.base_pressure),
@@ -154,7 +164,7 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
       enabled: dto.enabled ?? prev.enabled,
     };
     const res = await this.db.query(
-      `UPDATE sim_sensors SET name=$3, base_humidity=$4, base_temp=$5, base_battery=$6,
+      `UPDATE sim_sensors SET name=$3, base_neutrons=$4, base_temp=$5, base_battery=$6,
         base_pressure=$7, latitude=$8, longitude=$9, anomaly_mode=$10, anomaly_every=$11,
         humidity_min_threshold=$12, humidity_max_threshold=$13, battery_threshold=$14,
         enabled=$15, updated_at=now()
@@ -163,7 +173,7 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
         id,
         tenantId,
         next.name,
-        next.base_humidity,
+        next.base_neutrons,
         next.base_temp,
         next.base_battery,
         next.base_pressure,
@@ -286,12 +296,25 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
     const tick = Number(tickRes.rows[0]?.tick ?? 1);
     const idx = 0;
 
-    // Humedad objetivo: normal senoidal + 1 anómalo cada N (high/low).
+    // Escenario en espacio NEUTRONES (la app calcula θ con Geant4):
+    // base con deriva senoidal + 1 excursión cada N (mojado=N bajo, seco=N alto).
     const every = Math.max(2, Number(s.anomaly_every) || 20);
-    const baseHum = Number(s.base_humidity);
-    let humidity = clamp(baseHum + Math.sin(tick * 0.2 + idx) * 5 + (Math.random() * 2 - 1), 5, 99);
-    if (s.anomaly_mode === 'high' && tick % every === 0) humidity = 86 + Math.random() * 3;
-    if (s.anomaly_mode === 'low' && tick % every === 0) humidity = 12 + Math.random() * 2;
+    const baseN = Number(s.base_neutrons ?? 30);
+    let nTarget = clamp(
+      baseN + Math.sin(tick * 0.2 + idx) * 4 + (Math.random() * 3 - 1.5),
+      N_NORMAL[0],
+      N_NORMAL[1],
+    );
+    const isAnomalyTick = tick % every === 0;
+    if (isAnomalyTick) {
+      if (s.anomaly_mode === 'high') {
+        // Humedad alta (aviso >= 85 %): el agua absorbe neutrones → N bajo.
+        nTarget = N_WET[0] + Math.random() * (N_WET[1] - N_WET[0]);
+      } else if (s.anomaly_mode === 'low') {
+        // Humedad baja (alarma <= 15 %): suelo seco → N alto.
+        nTarget = N_DRY[0] + Math.random() * (N_DRY[1] - N_DRY[0]);
+      }
+    }
 
     const baseP = Number(s.base_pressure);
     const pressure = clamp(baseP + Math.sin(tick * 0.15) * 6 + (Math.random() * 2 - 1), 700, 1200);
@@ -304,9 +327,8 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
     const rssi = Math.round(clamp(-95 - Math.random() * 15, -120, -30));
     const snr = +clamp(7.5 + (Math.random() * 3 - 1.5), -20, 20).toFixed(1);
 
-    // N_raw acoplado a la presión (bucle cerrado con el backend).
-    const nMean = this.codec.estimateNeutronsFromHumidity(humidity, pressure);
-    const neutrons = Math.max(5, Math.round(nMean + gauss() * Math.sqrt(Math.max(1, nMean))));
+    // Recuento medido: objetivo del escenario + ruido Poisson (~sqrt(N)).
+    const neutrons = Math.max(5, Math.round(nTarget + gauss() * Math.sqrt(nTarget)));
 
     const eui = String(s.dev_eui).toLowerCase();
     const payload = {
@@ -321,16 +343,8 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
       time: new Date().toISOString(),
       fCnt: 100 + tick,
       fPort: 2,
-      data: Buffer.from([
-        Math.floor(humidity * 10) >> 8,
-        Math.floor(humidity * 10) & 0xff,
-        Math.floor(temperature * 10) >> 8,
-        Math.floor(temperature * 10) & 0xff,
-        Math.floor(battery * 1000) >> 8,
-        Math.floor(battery * 1000) & 0xff,
-      ]).toString('base64'),
       object: {
-        humidity: +humidity.toFixed(2),
+        // ÚNICA medida de humedad del sensor: recuento bruto de neutrones.
         neutron_counts: neutrons,
         temperature: +temperature.toFixed(2),
         battery: +battery.toFixed(2),

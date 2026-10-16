@@ -1,536 +1,205 @@
-# 📡 CORNEA IoT - Simulador de Sensores LoRaWAN
+# 📡 CORNEA IoT — Simulador de Sensores LoRaWAN (neutrones CRNS)
 
-Simulador de dispositivos y gateways LoRaWAN para pruebas de integración con **ChirpStack v4** y **Mosquitto MQTT Broker**. Desarrollado por Neutron Insights.
+Simulador de **sensores CORNEA** que publica eventos LoRaWAN (ChirpStack v4) en
+un broker MQTT para pruebas de integración. **CORNEA by Neutron Insights.**
 
-## 📋 Tabla de Contenidos
-
-- [Descripción](#descripción)
-- [Características](#características)
-- [Requisitos](#requisitos)
-- [Instalación](#instalación)
-- [Configuración](#configuración)
-- [Uso](#uso)
-- [Funcionamiento Detallado](#funcionamiento-detallado)
-- [Estructura del Payload](#estructura-del-payload)
-- [Referencia de Comandos](#referencia-de-comandos)
-- [Solución de Problemas](#solución-de-problemas)
+> ⚛️ **Principio de diseño:** el simulador se comporta como una sonda CRNS real,
+> es decir **mide y transmite conteos de neutrones, NO humedad**. La humedad
+> volumétrica (θ) la calcula **la app** (backend) con el modelo Geant4
+> calibrado a partir del recuento y de la presión del propio sensor.
 
 ---
 
-## 📖 Descripción
+## 📖 Modelo físico (por qué no se manda humedad)
 
-Este simulador emula el comportamiento de sensores IoT reales que se comunican mediante el protocolo **LoRaWAN**. Genera telemetría (temperatura, humedad, batería, etc.) y la publica en un broker MQTT siguiendo el formato de eventos de **ChirpStack v4**, permitiendo probar y validar plataformas IoT sin necesidad de hardware físico.
+Un detector CRNS cuenta neutrones cósmicos; los neutrones se **absorben** en el
+agua del suelo, así que **a más neutrones, menos humedad**. La sonda nunca conoce
+su humedad: solo mide N.
 
-### Casos de Uso
+Flujo real del sistema:
 
-- ✅ Pruebas de integración con ChirpStack
-- ✅ Validación de pipelines de datos IoT
-- ✅ Desarrollo de dashboards y visualizaciones
-- ✅ Testing de sistemas de alertas y anomalías
-- ✅ Pruebas de carga y escalabilidad
+```text
+Sonda: mide N_raw (con ruido Poisson) + presión, temperatura, batería, GPS
+   │  MQTT  application/1/device/<devEui>/event/up
+   ▼
+Backend (codec): fp = exp((P0-P)/L) · N_corr = N_raw·fp
+   │             θ = a0·e^(-a1·N_corr/N0) + a2      ← Geant4 calibrado
+   ▼
+App: guarda θ, evalúa alertas (15-85 %), dibuja gráficas y dispara SSE
+```
+
+Constantes (`cornea_pipeline/config/calibration_config.json`, R²=0.9687):
+`N0=143`, `a0=107.381`, `a1=3.0362`, `a2=-4.8942`, `P0=981.4`, `L=137`.
+
+**Valores de referencia** (P≈1013 hPa):
+
+| N_raw | θ (humedad) | Efecto |
+|---|---|---|
+| 8-10 | 86-88 % | aviso (regla `humidity >= 85`) |
+| 15-60 | 30-72 % | normal, sin alerta |
+| 102-110 | 12-14 % | alarma (regla `humidity <= 15`) |
 
 ---
 
 ## ⚡ Características
 
-- 🌍 **Red fija de 3 sensores CORNEA** con ubicaciones en Galicia (Sionlla, Castiñeiras, Aloia)
-- 📊 **Datos variables**: Genera fluctuaciones naturales en temperatura, humedad y batería
-- 🚨 **Inyección de anomalías**: Modo para probar sistemas de detección de fallos
-- 🔄 **Intervalos configurables**: Desde milisegundos (testing) hasta 30 minutos (producción, como las sondas físicas)
-- ⚛️ **Modo neutrónico CRNS**: Envía `neutron_counts` y el backend calcula θ con Geant4 (`--neutrons` o `NEUTRON_MODE=true`)
-- 🐳 **Arranque automático con Docker**: Servicio `simulator` en `docker-compose.yml` (primera ráfaga inmediata al conectar)
-- 📡 **Compatible con ChirpStack v4**: Formato de payload estándar
--  **Autenticación MQTT**: Soporte para usuario/contraseña
-- 📍 **Geolocalización**: Cada sensor incluye coordenadas GPS simuladas
+- 🌍 **Red fija de 3 sensores CORNEA** (Sionlla, Castiñeiras, Aloia) con los
+  mismos DevEUI que el seed del backend.
+- ☢️ **Solo neutrones**: el payload no lleva `humidity` ni binario de humedad.
+- 📉 **Relación inversa N↔θ** garantizada: más N ⇔ menos humedad.
+- 🎲 **Ruido Poisson** (dispersión ~√N) como único azar del detector.
+- 🚨 **Excursiones excepcionales**: 1 mensaje anómalo cada 20 por sensor.
+- ⏱️ **Cadencia configurable**: de 5 s (demo) a 30 min (como las sondas reales).
+- 📦 **Backfill** de 10 muestras previas al conectar (gráfica lista de salida).
+- 🐳 Servicio `simulator` en `docker-compose.yml` (perfil `sim-legacy`).
+- 🔐 Autenticación MQTT (`--user` / `--pass`).
+
+> La emisión en producción la hace el **simulador gestionable** del panel admin
+> (Administración → *Herramientas de desarrollo* → *Simulador de datos de
+> prueba*). Este script es el equivalente por terminal.
 
 ---
 
 ## 🛠️ Requisitos
 
-- **Node.js** >= 16.0.0
-- **Broker MQTT** (Mosquitto recomendado) corriendo en `localhost:1883`
-- Conexión a internet (para descarga de dependencias npm)
-
----
+- **Node.js** >= 18
+- Broker **Mosquitto** accesible (el del compose: `mqtt://mosquitto:1883`)
 
 ## 📥 Instalación
 
-### 1. Clonar o descargar el proyecto
-
 ```bash
-# Desde la raíz del repositorio (ruta relativa, válida en cualquier equipo)
 cd simulator
-```
-
-### 2. Instalar dependencias
-
-```bash
 npm install
 ```
 
-Esto instalará:
-- `mqtt` (v5.15.2) - Cliente MQTT para Node.js
-- Todas las dependencias auxiliares (buffers, streams, etc.)
-
-### 3. Verificar instalación
-
-```bash
-npm list
-```
-
----
-
 ## ⚙️ Configuración
 
-### Variables de Entorno (Recomendado)
-
-Crea un archivo `.env` en la raíz del proyecto o configura las variables en tu sistema:
-
 ```env
-# Broker MQTT
 MQTT_URL=mqtt://localhost:1883
 MQTT_USERNAME=iot
 MQTT_PASSWORD=changeme
 
-# Configuración (las variables de entorno tienen prioridad sobre los flags CLI)
-SENSOR_COUNT=5
-INTERVAL_MS=1800000
-INJECT_ANOMALIES=true
-NEUTRON_MODE=true
+SENSOR_COUNT=3          # red fija (valores >3 se ignoran con aviso)
+INTERVAL_MS=1800000     # 30 min, como las sondas físicas
+INJECT_ANOMALIES=true   # 1 excursión cada 20
+SIM_BACKFILL=10         # muestras históricas al arrancar
 ```
 
-**Nota:** Las variables de entorno tienen prioridad sobre los argumentos CLI.
-
-### Configuración del Broker MQTT
-
-Asegúrate de tener Mosquitto corriendo:
-
-```bash
-# Verificar si está escuchando en el puerto 1883
-netstat -ano | findstr :1883
-
-# Iniciar Mosquitto manualmente (si está instalado)
-mosquitto -v
-```
+Las variables de entorno tienen prioridad sobre los flags CLI.
 
 ---
 
 ## 🚀 Uso
 
-### Comandos Básicos
-
-#### 1. Modo Producción (30 minutos reales, como las sondas físicas)
-
 ```bash
-npm run simulate:30min
-# o
-node mock-lora-devices.js
+npm start                  # 3 CORNEA cada 30 min (modo sondas reales)
+npm run simulate:fast      # cada 5 s (demo en vivo)
+npm run simulate:5min      # cada 5 min
+npm run load-test          # ráfaga cada 2 s
+
+# Flags directos
+node mock-lora-devices.js --interval 10000 --url mqtt://broker:1883
 ```
 
-**Resultado:** 5 sensores enviando datos cada 30 minutos (primera ráfaga inmediata).
+| Flag | Defecto | Descripción |
+|---|---|---|
+| `--url` | `mqtt://localhost:1883` | Broker MQTT |
+| `--user` / `--pass` | `iot` / `changeme` | Credenciales |
+| `--count` | `3` | Red fija CORNEA (se ignora >3) |
+| `--interval` | `1800000` | Cadencia en ms |
+| `--anomalies` | activo | Excursiones 1/20 (`INJECT_ANOMALIES=false` las desactiva) |
+| `--backfill` | `10` | Muestras previas por sensor |
 
-#### 2. Modo Anomalías (Testing de alertas)
-
-```bash
-npm run simulate:anomalies
-# o
-node mock-lora-devices.js --anomalies
-```
-
-**Resultado:** Inyección automática de valores anómalos (humedad >85%, batería baja, etc.).
-
-#### 3. Modo Rápido (Desarrollo/Debugging)
-
-```bash
-npm run simulate:fast
-# o
-node mock-lora-devices.js --interval 5000 --anomalies
-```
-
-**Resultado:** Datos cada 5 segundos. Ideal para ver actualizaciones en tiempo real en tu dashboard.
-
-#### 4. Prueba de Carga (100 sensores)
-
-```bash
-npm run load-test
-# o
-node mock-lora-devices.js --count 100 --interval 2000
-```
-
-**Resultado:** 100 dispositivos simulados enviando datos cada 2 segundos.
+> Ya no existe `--neutrons` / `--no-neutrons`: **todos** los mensajes llevan
+> neutrones, porque es lo que hace el sensor real.
 
 ---
 
-## 🔍 Funcionamiento Detallado
+## 🔍 Funcionamiento
 
-### Paso 1: Inicialización
+**1. Perfiles** (`baseNeutrons` = recuento base, NO humedad):
 
-Al ejecutar el script, ocurre lo siguiente:
+| DevEUI | Sensor | base N | Régimen |
+|---|---|---|---|
+| `…6601` | CORNEA 01 · Polígono da Sionlla | 34 | aviso (1/20) |
+| `…6602` | CORNEA 02 · Lago de Castiñeiras | 40 | alarma (1/20) |
+| `…6603` | CORNEA 03 · Monte Aloia | 32 | siempre normal |
 
-```javascript
-// 1. Lectura de configuración
-MQTT_URL = process.env.MQTT_URL || 'mqtt://localhost:1883'
-MQTT_USER = process.env.MQTT_USERNAME || 'iot'
-MQTT_PASS = process.env.MQTT_PASSWORD || 'changeme'
-SENSOR_COUNT = 5 (por defecto)
-INTERVAL_MS = 1800000 (30 minutos, como las sondas físicas)
-```
-
-### Paso 2: Generación de Sensores
-
-Se crean `SENSOR_COUNT` dispositivos virtuales con:
-
-- **devEui**: Identificador único de 64 bits (ej: `0011223344556601`)
-- **Ubicación**: Coordenadas GPS basadas en ubicaciones reales de Galicia
-- **Valores base** (más deriva senoidal y régimen asignado: sonda 1 aviso, sonda 2 alarma, resto normal):
-  - Humedad nominal: 45-70% (episodios 86-89% / 12-14%)
-  - Temperatura: 16-24°C nominal (rango 8-28°C)
-  - Batería: 3.8-3.95V con degradación lenta (rango 3.0-4.1V)
-  - Presión base propia por sonda (~1002-1012 hPa, rango 980-1020 hPa)
-
-**Ejemplo de sensor generado:**
+**2. Escenario (espacio N)**
 
 ```javascript
-{
-  devEui: "0011223344556601",
-  name: "Sensor Humedad - Lago de Castiñeiras (Pontevedra)",
-  baseHumidity: 51,
-  baseTemp: 19.5,
-  baseBattery: 3.80,
-  lat: 42.3486,
-  lng: -8.6747,
-  fcnt: 100  // Contador de mensajes
-}
+normal = clamp(baseNeutrons + sin(tick·0.2+idx)·4 + ruido, 15, 60)
+// 1 de cada 20 (escalonado: 01 en tick%20==0, 02 en tick%20==10)
+mojado  → N = 8 + rand·2      // θ 86-88 %  → aviso
+seco    → N = 102 + rand·8    // θ 12-14 %  → alarma
 ```
 
-### Paso 3: Conexión MQTT
-
-El simulador establece conexión con el broker:
+**3. Medida (ruido Poisson)**
 
 ```javascript
-client = mqtt.connect(MQTT_URL, {
-  username: MQTT_USER,
-  password: MQTT_PASS,
-  clientId: `lora_sim_${random_string}`
-})
+neutron_counts = round(N_objetivo + gauss()·sqrt(N_objetivo))   // |ΔN| ≈ √N
 ```
 
-**Eventos manejados:**
-- ✅ `connect`: Conexión exitosa
-- ❌ `error`: Fallo de conexión (credenciales incorrectas, broker apagado, etc.)
-
-### Paso 4: Generación de Datos (Ciclo de Transmisión)
-
-Cada `INTERVAL_MS`, se ejecuta `transmitUplinks(tick)`:
-
-#### 4.1 Fluctuaciones Naturales
-
-Para cada sensor, se calculan valores realistas:
-
-```javascript
-// Humedad objetivo del escenario (normal 35-70% o episodio) + seno lento + ruido
-humidity = clamp(scenarioHumidity(sensor, tick), 35, 70)   // o 86-89% / 12-14% en episodio
-
-// Resto de métricas con rangos razonables (scenarioSecondary)
-temperature = clamp(baseTemp + cos(tick*0.2+idx)*4 + ruido, 8, 28)
-battery     = clamp(baseBattery - tick*0.0005, 3.0, 4.1)   // degradación lenta
-pressure    = clamp(basePressure + sin(tick*0.15+idx)*6 + ruido, 980, 1020)
-rssi = clamp(-95 - random*15, -115, -75)                   // dBm
-snr  = clamp(7.5 + (random*3-1.5), -2, 9)                  // dB
-
-// N_raw acoplado a la presión de ESE sensor (bucle cerrado con el backend):
-nMean = humidityToNeutrons(humidity, pressure)  // ratio·N0/fp, fp=exp((P0-P)/L)
-neutron_counts = nMean + gauss()*sqrt(nMean)    // ruido Poisson
-```
-
-#### 4.2 Inyección de Anomalías (si `--anomalies` está activo)
-
-**Excepcionales: 1 mensaje anómalo cada 20 por sensor con régimen**
-(CORNEA 01 en `tick%20==0`, CORNEA 02 en `tick%20==10`: nunca el mismo ciclo;
-el tick siguiente vuelve a normal y resuelve por histéresis):
-
-**CORNEA 01 (régimen `warning-high`):**
-- 1 tick: humedad objetivo **86-89%** (regla `humidity >= 85`, warning)
-
-**CORNEA 02 (régimen `critical-low`):**
-- 1 tick: humedad objetivo **12-14%** (regla `humidity <= 15`, critical)
-
-**CORNEA 03:** siempre normal (`35-70%`).
-
-**Propósito:** excursiones excepcionales visibles en gráfica y raw.
-NOTA: el backend suaviza θ con EMA (α=0.3 anti-Poisson), así que el pico
-aislado solo dispara evento si el suavizado cruza el umbral (el motor
-`alerts-engine.service.ts` dispara inmediato al breach, sin exigir duración).
-
-#### 4.3 Codificación del Payload
-
-Los datos se empaquetan en **dos formatos**:
-
-**A. Formato Binario (base64) - Para decodificación en ChirpStack:**
-
-```javascript
-data: Buffer.from([
-  Math.floor(humidity * 10) >> 8,        // Humedad (bytes altos)
-  Math.floor(humidity * 10) & 0xff,      // Humedad (bytes bajos)
-  Math.floor(temperature * 10) >> 8,     // Temperatura (bytes altos)
-  Math.floor(temperature * 10) & 0xff,   // Temperatura (bytes bajos)
-  Math.floor(battery * 1000) >> 8,       // Batería (bytes altos)
-  Math.floor(battery * 1000) & 0xff,     // Batería (bytes bajos)
-]).toString('base64')
-```
-
-**Ejemplo:** `humidity=68.4` → `684` → `0x02AC` → Bytes: `[0x02, 0xAC]`
-
-**B. Formato JSON (object) - Para lectura directa:**
-
-```javascript
-object: {
-  humidity: 68.42,          // En modo neutrónico el backend la IGNORA y calcula θ desde N_raw
-  neutron_counts: 22.5,     // N_raw = ratio·N0/fp(P_sensor): cierra el bucle con la presión
-  temperature: 23.15,
-  battery: 3.84,
-  pressure: 1007.3,         // Variable por sensor (980-1020 hPa): corrige N en el backend
-  latitude: 42.3486,
-  longitude: -8.6747
-}
-```
-
-### Paso 5: Publicación MQTT
-
-El mensaje se publica en el topic estándar de ChirpStack v4:
-
-```javascript
-topic = `application/1/device/${devEui}/event/up`
-```
-
-**Ejemplo de topic:**
-```
-application/1/device/0011223344556601/event/up
-```
-
-**Estructura completa del mensaje:**
+**4. Payload** (topic `application/1/device/<devEui>/event/up`)
 
 ```json
 {
   "applicationId": "1",
   "deviceInfo": {
-    "tenantId": "1",
-    "applicationId": "1",
+    "tenantId": "1", "applicationId": "1",
     "deviceProfileId": "profile-soil-moisture",
-    "deviceName": "Sensor Humedad - Lago de Castiñeiras",
-    "devEui": "0011223344556601"
+    "deviceName": "CORNEA 02 - Lago de Castiñeiras (Pontevedra)",
+    "devEui": "0011223344556602"
   },
-  "time": "2026-09-08T10:30:45.123Z",
+  "time": "2026-09-22T09:30:00.000Z",
   "fCnt": 101,
   "fPort": 2,
-  "data": "AgC4A...",  // Base64 del payload binario
   "object": {
-    "humidity": 68.42,
-    "temperature": 23.15,
-    "battery": 3.84,
-    "pressure": 1013.2,
+    "neutron_counts": 38,
+    "temperature": 18.4,
+    "battery": 3.87,
+    "pressure": 1013.1,
     "latitude": 42.3486,
     "longitude": -8.6747
   },
-  "rxInfo": [
-    {
-      "gatewayId": "AABBCCDDEEFF0011",
-      "rssi": -98,
-      "snr": 8.2
-    }
-  ]
+  "rxInfo": [{ "gatewayId": "AABBCCDDEEFF0011", "rssi": -98, "snr": 7.9 }]
 }
 ```
 
-### Paso 6: Ciclo Continuo
-
-```javascript
-// Primer envío inmediato
-transmitUplinks(1)
-
-// Envíos periódicos
-setInterval(() => {
-  tick++
-  transmitUplinks(tick)
-}, INTERVAL_MS)
-```
-
-**Salida en consola:**
-```
-[12:30:45] 📡 Uplinks enviados: 5 sensores (ciclo #1)
-⏳ Próximo envío programado en 30 minutos...
-```
+👉 **No hay `humidity` ni campo `data` binario**: es exactamente lo que
+transmite una sonda CRNS. La app deriva θ de `neutron_counts` + `pressure`.
 
 ---
 
-## 📦 Estructura del Payload
+## 🐳 Con Docker
 
-### Campos Principales
+```powershell
+docker compose --profile sim-legacy up -d simulator   # solo si lo necesitas
+docker compose logs -f simulator
+```
 
-| Campo | Tipo | Descripción | Ejemplo |
-|-------|------|-------------|---------|
-| `applicationId` | String | ID de aplicación en ChirpStack | `"1"` |
-| `deviceInfo.devEui` | String | Identificador único del dispositivo | `"0011223344556601"` |
-| `deviceInfo.deviceName` | String | Nombre descriptivo del sensor | `"Sensor Humedad - Lago..."` |
-| `time` | ISO 8601 | Timestamp del mensaje | `"2026-09-08T10:30:45.123Z"` |
-| `fCnt` | Integer | Contador de frames (incremental) | `101` |
-| `fPort` | Integer | Puerto LoRaWAN (1-223) | `2` |
-| `data` | Base64 | Payload binario codificado | `"AgC4A..."` |
-| `object` | JSON | Payload decodificado (legible) | `{humidity: 68.42, ...}` |
-| `rxInfo[].rssi` | Integer | Fuerza de señal recibida (dBm) | `-98` |
-| `rxInfo[].snr` | Float | Relación señal-ruido (dB) | `8.2` |
-
-### Decodificación del Payload Binario
-
-El campo `data` contiene 6 bytes:
-
-| Bytes | Campo | Fórmula | Rango |
-|-------|-------|---------|-------|
-| 0-1 | Humedad | `(byte0 << 8 | byte1) / 10` | 0-6553.5% |
-| 2-3 | Temperatura | `(byte2 << 8 | byte3) / 10` | -3276.8 a 3276.7°C |
-| 4-5 | Batería | `(byte4 << 8 | byte5) / 1000` | 0-65.535V |
-
-**Ejemplo práctico:**
-
-Bytes: `[0x02, 0xAC, 0x00, 0xE7, 0x0F, 0x08]`
-
-- Humedad: `(0x02AC) / 10 = 684 / 10 = 68.4%`
-- Temperatura: `(0x00E7) / 10 = 231 / 10 = 23.1°C`
-- Batería: `(0x0F08) / 1000 = 3848 / 1000 = 3.848V`
+Desde el panel admin no hace falta terminal: el simulador gestionable emite los
+mismos uplinks (con perfiles editables y frecuencia en segundos).
 
 ---
 
-## 📚 Referencia de Comandos
+## ❓ Solución de problemas
 
-### Scripts NPM
+| Síntoma | Causa probable | Acción |
+|---|---|---|
+| `connack timeout` | Broker no accesible | `netstat -ano \| findstr :1883`; revisa `MQTT_URL` |
+| `Connection refused` | Credenciales | `MQTT_USERNAME` / `MQTT_PASSWORD` |
+| No hay datos nuevos | Intervalo largo | Baja `--interval` a 5000 para probar |
+| θ siempre ~0 o 100 | `pressure` absurda | Debe estar entre 980-1020 hPa |
 
-| Comando | Descripción | Intervalo | Sensores | Anomalías |
-|---------|-------------|-----------|----------|-----------|
-| `npm start` | Modo producción (como sondas físicas) | 30 min | 5 | ✅ |
-| `npm run simulate:30min` | Modo producción | 30 min | 5 | ✅ |
-| `npm run simulate:5min` | Intervalo medio | 5 min | 5 | ✅ |
-| `npm run simulate:anomalies` | Testing de alertas | 5 min | 5 | ✅ |
-| `npm run simulate:fast` | Desarrollo/Debug | 5 seg | 5 | ✅ |
-| `npm run simulate:neutrons` | Modo CRNS (θ desde N_raw en backend) | 5 seg | 5 | ✅ |
-| `npm run load-test` | Ráfaga de los 3 CORNEA | 2 seg | 3 | ✅ |
-
-### Argumentos CLI
-
-| Argumento | Var. entorno | Tipo | Por defecto | Descripción |
-|-----------|--------------|------|-------------|-------------|
-| `--url` | `MQTT_URL` | String | `mqtt://localhost:1883` | URL del broker MQTT |
-| `--user` | `MQTT_USERNAME` | String | `iot` | Usuario MQTT |
-| `--pass` | `MQTT_PASSWORD` | String | `changeme` | Contraseña MQTT |
-| `--count` | `SENSOR_COUNT` | Integer | `3` | Red fija CORNEA: valores >3 se ignoran con aviso |
-| `--interval` | `INTERVAL_MS` | Integer | `1800000` (30 min) | Intervalo en ms entre envíos (acelerar tiempo con valores bajos) |
-| `--anomalies` | `INJECT_ANOMALIES` | Flag | `true` | Episodios aviso/alarma (`INJECT_ANOMALIES=false` los desactiva) |
-| `--neutrons` | `NEUTRON_MODE` | Flag | `true` | Modo CRNS: envía `neutron_counts` (N_raw con ruido Poisson ~sqrt(N), acoplado a la presión del sensor) y el backend calcula θ con el modelo Geant4 (`cornea_pipeline/config/calibration_config.json`, N₀=143.0) |
-| `--no-neutrons` | `NEUTRON_MODE=false` | Flag | — | Solo humedad directa (modo legacy) |
-| `--backfill` | `SIM_BACKFILL` | Integer | `10` | Muestras históricas por sensor al conectar (cada intervalo, CON episodios para que la gráfica nazca con normalidad+aviso+alarma, timestamps en rejilla, idempotente) |
-
-**Ejemplos avanzados:**
+Verificar el tráfico MQTT:
 
 ```bash
-# Conectar a broker remoto
-node mock-lora-devices.js --url mqtt://192.168.1.100:1883 --user admin --pass secret123
-
-# Simular 20 sensores cada 10 segundos
-node mock-lora-devices.js --count 20 --interval 10000
-
-# Modo rápido sin anomalías (ojo: por defecto SÍ hay anomalías)
-INJECT_ANOMALIES=false node mock-lora-devices.js --interval 1000
-
-# Combinación de parámetros
-node mock-lora-devices.js --count 50 --interval 5000 --anomalies --url mqtt://broker.hivemq.com:1883
+npx mqtt-cli sub -t 'application/1/device/+/event/up' -h localhost -u iot -P changeme
 ```
-
----
-
-##  Solución de Problemas
-
-### ❌ Error: "connack timeout"
-
-**Causa:** El broker MQTT no está corriendo o no es accesible.
-
-**Solución:**
-```bash
-# Verificar si Mosquitto está escuchando
-netstat -ano | findstr :1883
-
-# Si no hay resultado, iniciar Mosquitto
-mosquitto -v
-
-# O verificar que Docker esté corriendo (si usas docker-compose)
-docker-compose ps
-```
-
-### ❌ Error: "Connection refused"
-
-**Causa:** Credenciales incorrectas o broker requiere autenticación.
-
-**Solución:**
-```bash
-# Verificar usuario/contraseña en .env
-MQTT_USERNAME=iot
-MQTT_PASSWORD=changeme
-
-# O pasar por CLI
-node mock-lora-devices.js --user iot --pass changeme
-```
-
-###  Los sensores no envían datos
-
-**Causa:** Intervalo demasiado largo o proceso bloqueado.
-
-**Solución:**
-```bash
-# Usar modo rápido para verificar
-npm run simulate:fast
-
-# Verificar consola: debe mostrar "[HH:MM:SS] 📡 Uplinks LoRaWAN enviados..."
-```
-
-###  Verificar que los mensajes llegan al broker
-
-**Opción 1: Suscribirse desde otra terminal**
-```bash
-# Instalar cliente MQTT CLI
-npm install -g mqtt
-
-# Suscribirse a todos los topics de la aplicación
-mqtt sub -t 'application/1/device/+/event/up' -h localhost
-```
-
-**Opción 2: Usar MQTT Explorer (GUI)**
-- Descargar: https://mqtt-explorer.com/
-- Conectar a: `mqtt://localhost:1883`
-- Ver topics: `application/1/device/#`
-
----
-
-## 🌐 Ubicaciones de Sensores Simulados
-
-La red fija incluye 3 sensores CORNEA (mismos DevEUI/nombre que el seed):
-
-1. **CORNEA 01 - Polígono da Sionlla (Santiago)** - 42.910917, -8.491110 (`...6601`, régimen aviso)
-2. **CORNEA 02 - Lago de Castiñeiras (Pontevedra)** - 42.3486, -8.6747 (`...6602`, régimen alarma)
-3. **CORNEA 03 - Monte Aloia, Tui (Pontevedra)** - 42.0682, -8.6750 (`...6603`, siempre normal)
 
 ---
 
 ## 📝 Licencia
 
-Desarrollado por **Neutron Insights** para la plataforma **CORNEA IoT**.
-
----
-
-##  Contribuciones
-
-Para reportar bugs o solicitar características:
-1. Abrir un issue en el repositorio
-2. Incluir logs de error completos
-3. Especificar versión de Node.js y sistema operativo
-
----
-
-**¡Gracias por usar CORNEA IoT Simulator! 🚀**
+MIT — Neutron Insights (proyecto CORNEA IoT).

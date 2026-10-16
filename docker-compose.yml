@@ -251,7 +251,6 @@ services:
       # 30 min como las sondas físicas; primera ráfaga inmediata al conectar.
       # Para acelerar el tiempo simulado, bajar SIM_INTERVAL_MS (p. ej. 5000).
       - INTERVAL_MS=${SIM_INTERVAL_MS:-1800000}
-      - NEUTRON_MODE=${SIM_NEUTRON_MODE:-true}
       - INJECT_ANOMALIES=${SIM_ANOMALIES:-true}
       # Histórico inicial (muestras por sensor, cada INTERVAL_MS) al conectar
       - SIM_BACKFILL=${SIM_BACKFILL:-10}

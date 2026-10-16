@@ -219,6 +219,9 @@ CREATE TABLE IF NOT EXISTS sim_sensors (
     name VARCHAR(255) NOT NULL,
     dev_eui VARCHAR(32) UNIQUE NOT NULL,
     base_humidity DOUBLE PRECISION NOT NULL DEFAULT 55.0,
+    -- Recuento base de neutrones (N_raw) que emite el sensor virtual.
+    -- La humedad la calcula la app con Geant4 (base_humidity queda obsoleto).
+    base_neutrons DOUBLE PRECISION NOT NULL DEFAULT 30.0,
     base_temp DOUBLE PRECISION NOT NULL DEFAULT 19.0,
     base_battery DOUBLE PRECISION NOT NULL DEFAULT 3.9,
     base_pressure DOUBLE PRECISION NOT NULL DEFAULT 1012.0,

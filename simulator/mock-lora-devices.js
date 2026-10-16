@@ -3,12 +3,20 @@
  * CORNEA by Neutron Insights
  *
  * Estructura:
- *   1. CONFIG (env/CLI) → 2. PERFILES SENSORES → 3. MOTOR ESCENARIOS
- *   → 4. FISICA NEUTRONES → 5. BUILDER PAYLOAD → 6. SCHEDULER
+ *   1. CONFIG (env/CLI) → 2. PERFILES SENSORES → 3. MOTOR ESCENARIOS (N)
+ *   → 4. RUIDO POISSON → 5. BUILDER PAYLOAD → 6. SCHEDULER
+ *
+ * MODELO FÍSICO (como una sonda CRNS real): el simulador NO manda humedad.
+ * Mide y transmite únicamente el recuento bruto de neutrones (N_raw); la
+ * humedad volumétrica (θ) la calcula la app en el backend con el modelo
+ * Geant4 calibrado: θ = a0·e^(-a1·N·fp/N0) + a2, con la corrección barométrica
+ * fp = exp((P0-P)/L) usando la presión de ESE sensor.
+ * Relación inversa (ver README): más N ⇔ MENOS humedad.
  *
  * Red fija: 3 sensores CORNEA (mismos DevEUI/nombre que el seed del backend).
- * Anomalías excepcionales: 1 mensaje anómalo cada 20 por sensor con régimen
- * (CORNEA 01 → aviso >85 %, CORNEA 02 → alarma <15 %, CORNEA 03 → normal).
+ * Excursiones excepcionales: 1 mensaje anómalo cada 20 por sensor con
+ * régimen (CORNEA 01 → mojado → aviso humidity >= 85 %, CORNEA 02 → seco →
+ * alarma humidity <= 15 %, CORNEA 03 → siempre normal).
  *
  * Uso:
  *   node mock-lora-devices.js                 # Cada 30 minutos reales
@@ -34,13 +42,9 @@ const SENSOR_COUNT_REQ = parseInt(process.env.SENSOR_COUNT || getArg('--count', 
 const INTERVAL_MS = parseInt(process.env.INTERVAL_MS || getArg('--interval', '1800000'), 10);
 const INJECT_ANOMALIES =
   process.env.INJECT_ANOMALIES === 'false' ? false : args.includes('--anomalies') || true;
-// Histórico inicial: 10 muestras previas (cada INTERVAL_MS) para la gráfica.
+// Backfill histórico: 10 muestras previas (cada INTERVAL_MS) para la gráfica.
 const BACKFILL_RAW = parseInt(process.env.SIM_BACKFILL || getArg('--backfill', '10'), 10);
 const BACKFILL = Number.isNaN(BACKFILL_RAW) ? 10 : Math.max(0, BACKFILL_RAW);
-// Modo neutrónico CRNS (activo por defecto): el backend calcula θ desde N_raw.
-const NEUTRON_MODE = args.includes('--no-neutrons')
-  ? false
-  : args.includes('--neutrons') || process.env.NEUTRON_MODE !== 'false';
 
 console.log('📡 =============================================================');
 console.log('   CORNEA IoT - SIMULADOR DE RED LORAWAN (Neutron Insights)');
@@ -52,15 +56,15 @@ if (SENSOR_COUNT_REQ !== 3) {
 console.log('Sensores CORNEA: 3 (01 Sionlla, 02 Castiñeiras, 03 Aloia)');
 console.log(`Intervalo de transmisión: ${INTERVAL_MS / 1000} segundos (${INTERVAL_MS / 60000} minutos)`);
 console.log(`Backfill histórico: ${BACKFILL} muestras previas cada ${INTERVAL_MS / 60000} min`);
-console.log(`Inyección de anomalías: ${INJECT_ANOMALIES ? 'ACTIVADA' : 'DESACTIVADA'}`);
-console.log(`Modo neutrónico CRNS: ${NEUTRON_MODE ? 'ACTIVADO (θ calculada en backend)' : 'DESACTIVADO'}`);
+console.log(`Excursiones anómalas: ${INJECT_ANOMALIES ? 'ACTIVADAS (1 cada 20)' : 'DESACTIVADAS'}`);
+console.log('Medida transmitida: N_raw (cuantos) · la humedad la calcula la app (Geant4)');
 console.log('-------------------------------------------------------------');
 
 // ============================================================================
 // 2. PERFILES SENSORES — red fija de 3 sensores CORNEA (mismos DevEUI y
 //    nombre que el seed del backend para que seed y simulador coincidan).
-//    Regímenes: CORNEA 01 → aviso (>85%), CORNEA 02 → alarma (<15%),
-//    CORNEA 03 → siempre normal.
+//    `baseNeutrons` es el recuento base (NO humedad): ≈ θ 55/50/58 %.
+//    Regímenes: CORNEA 01 → aviso, CORNEA 02 → alarma, CORNEA 03 → normal.
 // ============================================================================
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 
@@ -69,7 +73,7 @@ const sensors = [
     devEui: '0011223344556601',
     name: 'CORNEA 01 - Polígono da Sionlla (Santiago)',
     regime: 'warning-high',
-    baseHumidity: 55,
+    baseNeutrons: 34,
     baseTemp: 19,
     baseBattery: 3.9,
     basePressure: 1011.6,
@@ -81,7 +85,7 @@ const sensors = [
     devEui: '0011223344556602',
     name: 'CORNEA 02 - Lago de Castiñeiras (Pontevedra)',
     regime: 'critical-low',
-    baseHumidity: 50,
+    baseNeutrons: 40,
     baseTemp: 18,
     baseBattery: 3.87,
     basePressure: 1012.8,
@@ -93,7 +97,7 @@ const sensors = [
     devEui: '0011223344556603',
     name: 'CORNEA 03 - Monte Aloia, Tui (Pontevedra)',
     regime: 'normal',
-    baseHumidity: 58,
+    baseNeutrons: 32,
     baseTemp: 17,
     baseBattery: 3.84,
     basePressure: 1013.4,
@@ -104,35 +108,46 @@ const sensors = [
 ];
 
 // ============================================================================
-// 3. MOTOR ESCENARIOS — humedad objetivo por (sensor, tick)
-//    Reglas seed: warning humidity >= 85 (histeresis 3 → resuelve < 82),
-//    critical humidity <= 15 (histeresis 3 → resuelve > 18).
-//    Avisos/alertas EXCEPCIONALES: 1 mensaje anómalo cada 20 por sensor con
-//    régimen (CORNEA 01 en tick%20==0, CORNEA 02 en tick%20==10: nunca el
-//    mismo ciclo). El tick siguiente vuelve a normal y resuelve por
-//    histéresis. NOTA: el backend suaviza θ con EMA (α=0.3 anti-Poisson),
-//    así que el pico aislado se ve en gráfica/raw pero solo dispara evento
-//    si el suavizado cruza el umbral (arranques en frío o rachas de ruido).
+// 3. MOTOR ESCENARIOS — recuento objetivo N por (sensor, tick)
+//    El escenario vive en espacio NEUTRONES; la app traduce N → θ con Geant4.
+//    Bandas calibradas con calibration_config.json (N0=143, P0=981.4, L=137):
+//      · normal   N ≈ 15-60   → θ ≈ 30-72 %   (nunca dispara alerta)
+//      · mojado   N ≈ 8-10    → θ ≈ 86-88 %   → aviso  humidity >= 85 %
+//      · seco     N ≈ 102-110 → θ ≈ 12-14 %   → alarma humidity <= 15 %
+//    Avisos/alertas EXCEPCIONALES: 1 de cada 20 por sensor, escalonados
+//    (CORNEA 01 en tick%20==0, CORNEA 02 en tick%20==10: nunca el mismo ciclo).
+//    Ojo: humedad alta ⇔ conteo BAJO (los neutrones se absorben en el agua).
+//    NOTA: el backend suaviza θ con EMA (α=0.3 anti-Poisson), así que la
+//    excursión aislada se ve en N (gráfica/raw) pero solo dispara evento si el
+//    suavizado cruza el umbral (arranques en frío o rachas de ruido).
 // ============================================================================
 const CYCLE = 20;
+const N_WET = [8, 10]; // θ 86-88 %   (aviso humidity >= 85)
+const N_DRY = [102, 110]; // θ 12-14 %   (alarma humidity <= 15)
+const N_NORMAL = [15, 60]; // θ 30-72 %   (sin alerta)
 
-function scenarioHumidity(sensor, tick, anomaliesOn) {
-  // Base normal: deriva lenta senoidal + ruido leve (35-70%).
+function scenarioNeutrons(sensor, tick, anomaliesOn) {
+  // Base normal: deriva lenta senoidal + ruido leve en espacio N.
   const idx = sensors.indexOf(sensor);
-  const normalBase =
-    sensor.baseHumidity + Math.sin(tick * 0.2 + idx) * 5 + (Math.random() * 2 - 1);
-  const normal = clamp(normalBase, 35, 70);
+  const normal = clamp(
+    sensor.baseNeutrons + Math.sin(tick * 0.2 + idx) * 4 + (Math.random() * 3 - 1.5),
+    N_NORMAL[0],
+    N_NORMAL[1],
+  );
 
   if (!anomaliesOn || sensor.regime === 'normal') return normal;
 
-  // 1 de cada 20 mensajes, escalonado entre sensores.
-  if (sensor.regime === 'warning-high' && tick % CYCLE === 0) return 86 + Math.random() * 3; // 86-89%
-  if (sensor.regime === 'critical-low' && tick % CYCLE === 10) return 12 + Math.random() * 2; // 12-14%
+  if (sensor.regime === 'warning-high' && tick % CYCLE === 0) {
+    return N_WET[0] + Math.random() * (N_WET[1] - N_WET[0]);
+  }
+  if (sensor.regime === 'critical-low' && tick % CYCLE === 10) {
+    return N_DRY[0] + Math.random() * (N_DRY[1] - N_DRY[0]);
+  }
   return normal;
 }
 
 function scenarioSecondary(sensor, tick) {
-  // Rangos razonables resto de métricas (ingesta descarta humidity fuera 0-100).
+  // Rangos razonables del resto de métricas (la ingesta descarta imposibles).
   const idx = sensors.indexOf(sensor);
   const temperature = clamp(
     sensor.baseTemp + Math.cos(tick * 0.2 + idx) * 4 + (Math.random() * 0.8 - 0.4),
@@ -147,21 +162,9 @@ function scenarioSecondary(sensor, tick) {
 }
 
 // ============================================================================
-// 4. FISICA NEUTRONES — inversa Geant4 θ → N_raw + ruido Poisson ~sqrt(N)
-//    Bucle cerrado con presión del sensor: N_raw = ratio·N0 / fp,
-//    fp = exp((P0-P)/L). El backend hace la directa N_corr = N_raw·fp,
-//    así θ_final ≈ θ_objetivo (igual que seed.ts:218).
-//    (cornea_pipeline/config/calibration_config.json)
+// 4. RUIDO POISSON del detector: la medida cruda es un recuento entero con
+//    dispersión ~sqrt(N) (Box-Muller). Es el único "azar" de la sonda.
 // ============================================================================
-const CAL = {
-  N0: 143.0,
-  a0: 107.38107297640175,
-  a1: 3.0361746292354415,
-  a2: -4.894223415942227,
-  P0: 981.4,
-  L: 137.0,
-};
-
 const gauss = () => {
   let u = 0, v = 0;
   while (!u) u = Math.random();
@@ -169,30 +172,16 @@ const gauss = () => {
   return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
 };
 
-const humidityToNeutrons = (theta, pressureHpa = CAL.P0) => {
-  const t = clamp(theta, 0.5, 99);
-  const x = (t - CAL.a2) / CAL.a0;
-  if (x <= 0) return Math.round(CAL.N0);
-  const ratio = -Math.log(x) / CAL.a1;
-  const fp = Math.exp((CAL.P0 - pressureHpa) / CAL.L);
-  if (!(fp > 0)) return Math.round(CAL.N0);
-  return Math.max(5, Math.round(((ratio * CAL.N0) / fp) * 10) / 10);
-};
-
 // ============================================================================
-// 5. BUILDER PAYLOAD ChirpStack v4 (1 JSON/sensor con medidas)
+// 5. BUILDER PAYLOAD ChirpStack v4: SOLO medidas del sensor (N_raw + entorno).
+//    Sin campo `humidity` ni binario: el backend deriva θ desde N_raw+presión.
 // ============================================================================
 function buildUplink(sensor, tick, timeISO, anomaliesOn) {
-  // 1º presión del sensor (cada sonda tiene la suya), 2º humedad objetivo,
-  // 3º N_raw con esa presión → el backend deriva θ ≈ objetivo.
   const { temperature, battery, pressure, rssi, snr } = scenarioSecondary(sensor, tick);
-  const humidity = scenarioHumidity(sensor, tick, anomaliesOn);
+  const nTarget = scenarioNeutrons(sensor, tick, anomaliesOn);
 
-  let neutronCounts;
-  if (NEUTRON_MODE) {
-    const nMean = humidityToNeutrons(humidity, pressure);
-    neutronCounts = Math.max(5, Math.round(nMean + gauss() * Math.sqrt(nMean)));
-  }
+  // Recuento medido: objetivo del escenario + ruido Poisson (~sqrt(N)).
+  const neutronCounts = Math.max(5, Math.round(nTarget + gauss() * Math.sqrt(nTarget)));
 
   sensor.fcnt += 1;
   const topic = `application/1/device/${sensor.devEui.toLowerCase()}/event/up`;
@@ -208,18 +197,9 @@ function buildUplink(sensor, tick, timeISO, anomaliesOn) {
     time: timeISO,
     fCnt: sensor.fcnt,
     fPort: 2,
-    data: Buffer.from([
-      Math.floor(humidity * 10) >> 8,
-      Math.floor(humidity * 10) & 0xff,
-      Math.floor(temperature * 10) >> 8,
-      Math.floor(temperature * 10) & 0xff,
-      Math.floor(battery * 1000) >> 8,
-      Math.floor(battery * 1000) & 0xff,
-    ]).toString('base64'),
     object: {
-      humidity: +humidity.toFixed(2),
-      // En modo neutrónico el backend ignora `humidity` y calcula θ desde N_raw
-      ...(NEUTRON_MODE ? { neutron_counts: neutronCounts } : {}),
+      // ÚNICA medida de humedad del sensor: el recuento bruto de neutrones.
+      neutron_counts: neutronCounts,
       temperature: +temperature.toFixed(2),
       battery: +battery.toFixed(2),
       pressure: +pressure.toFixed(1),
@@ -258,8 +238,8 @@ client.on('connect', () => {
   console.log('🚀 Enviando histórico + primera ráfaga de telemetría...\n');
 
   // Backfill: 10 registros previos separados INTERVAL_MS (más antiguo primero),
-  // con el ritmo 1/20 (el tick 1000 cae en pico de CORNEA 01: el histórico
-  // ya muestra 1 excursión excepcional y la gráfica evidencia N↔θ contrarios).
+  // con el ritmo 1/20 (el tick 1000 cae en la excursión de CORNEA 01: el
+  // histórico ya muestra un pico de N y la gráfica evidencia N↔θ contrarios).
   // Timestamps en rejilla de intervalo (idempotente con ON CONFLICT).
   if (BACKFILL > 0) {
     const grid = Math.max(1000, INTERVAL_MS);
