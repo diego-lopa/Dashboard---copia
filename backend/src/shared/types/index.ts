@@ -35,7 +35,7 @@ export interface DeviceEntity {
   latest_snr?: number;
   /** Último recuento bruto de neutrones CRNS (cuantos, promedio 30 min). */
   latest_neutron_counts?: number;
-  status?: 'online' | 'warning' | 'critical' | 'offline';
+  status?: 'online' | 'warning' | 'critical' | 'offline' | 'disabled';
 }
 
 export interface MeasurementRecord {

@@ -125,6 +125,10 @@ export const AdminView: React.FC = () => {
     battery_threshold: number;
     enabled: boolean;
     tick?: number;
+    /** Dispositivo real vinculado por DevEUI (si existe). */
+    linked?: boolean;
+    device_enabled?: boolean | null;
+    device_visible?: boolean | null;
   }
   const SIM_DEFAULTS = {
     name: '', devEui: '', baseNeutrons: '30', baseTemp: '19', baseBattery: '3.9',
@@ -1049,6 +1053,7 @@ export const AdminView: React.FC = () => {
                   <th className="py-3 px-4">{t('rule_name')}</th>
                   <th className="py-3 px-4">DevEUI</th>
                   <th className="py-3 px-4">{t('sim_base_neutrons')}</th>
+                  <th className="py-3 px-4">{t('sim_profile_col')}</th>
                   <th className="py-3 px-4">{t('sim_anomaly_mode')}</th>
                   <th className="py-3 px-4">{t('sim_enabled_col')}</th>
                   <th className="py-3 px-4 text-right">{t('actions')}</th>
@@ -1067,6 +1072,15 @@ export const AdminView: React.FC = () => {
                       {s.dev_eui}
                     </td>
                     <td className="py-2.5 px-4 text-indigo-400 font-medium">{Number(s.base_neutrons)}</td>
+                    <td className="py-2.5 px-4">
+                      {s.linked === false ? (
+                        <span className="text-[10px] text-amber-500">{t('sim_profile_no')}</span>
+                      ) : s.device_enabled === false ? (
+                        <span className="text-[10px] text-slate-400">{t('dev_disabled')}</span>
+                      ) : (
+                        <span className="text-[10px] text-emerald-500">{t('sim_profile_yes')}</span>
+                      )}
+                    </td>
                     <td className="py-2.5 px-4">
                       {s.anomaly_mode === 'none'
                         ? t('sim_anomaly_none')

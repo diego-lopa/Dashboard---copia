@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsOptional, IsString, IsNumber, IsBoolean, Matches } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, IsNumber, IsBoolean, IsIn, IsInt, Matches, Max, Min } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateDeviceDto {
@@ -64,6 +64,34 @@ export class CreateDeviceDto {
   @IsOptional()
   @IsNumber()
   humidityMaxThreshold?: number;
+
+  @ApiPropertyOptional({
+    default: true,
+    description:
+      'Crear además el perfil del Simulador de datos de prueba para este sensor (mismo DevEUI)',
+  })
+  @IsOptional()
+  @IsBoolean()
+  createSimProfile?: boolean;
+
+  @ApiPropertyOptional({ default: 30.0, description: 'Perfil de simulación: recuento base de neutrones' })
+  @IsOptional()
+  @IsNumber()
+  @Min(5)
+  @Max(200)
+  simBaseNeutrons?: number;
+
+  @ApiPropertyOptional({ default: 'none', enum: ['none', 'high', 'low'] })
+  @IsOptional()
+  @IsIn(['none', 'high', 'low'])
+  simAnomalyMode?: 'none' | 'high' | 'low';
+
+  @ApiPropertyOptional({ default: 20 })
+  @IsOptional()
+  @IsInt()
+  @Min(2)
+  @Max(1000)
+  simAnomalyEvery?: number;
 }
 
 export class UpdateDeviceVisibilityDto {

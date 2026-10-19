@@ -93,18 +93,71 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
        RETURNING *;`,
       [tenantId, dto.enabled ?? null, interval ?? null],
     );
+
+    // Al activar el simulador se emite una muestra inmediata de cada sensor:
+    // si no, el primero tardaría hasta un ciclo completo (30 min) en conectar.
+    if (res.rows[0]?.enabled) {
+      await this.emitAllNow(tenantId);
+    }
     return res.rows[0];
   }
 
+  /** Emisión inmediata (pública: la usa DevicesService al crear un sensor). */
+  async emitNow(id: string): Promise<void> {
+    try {
+      const res = await this.db.query(
+        `SELECT s.*, d.enabled AS device_enabled
+         FROM sim_sensors s
+         LEFT JOIN devices d ON d.dev_eui = s.dev_eui AND d.tenant_id = s.tenant_id
+         WHERE s.id = $1 AND s.enabled = true AND (d.id IS NULL OR d.enabled = true)`,
+        [id],
+      );
+      if (res.rows.length === 0) return; // perfil o sensor desactivado
+      this.ensureClient();
+      await this.emit(res.rows[0]);
+    } catch (err) {
+      this.logger.warn(`Muestra inmediata no enviada: ${err?.message}`);
+    }
+  }
+
+  private async emitAllNow(tenantId: string): Promise<void> {
+    try {
+      const res = await this.db.query(
+        `SELECT s.id FROM sim_sensors s
+         LEFT JOIN devices d ON d.dev_eui = s.dev_eui AND d.tenant_id = s.tenant_id
+         WHERE s.tenant_id = $1 AND s.enabled = true AND (d.id IS NULL OR d.enabled = true)`,
+        [tenantId],
+      );
+      this.ensureClient();
+      for (const row of res.rows) await this.emitNow(row.id);
+    } catch (err) {
+      this.logger.warn(`Muestras inmediatas no enviadas: ${err?.message}`);
+    }
+  }
+
   // ── Sensores virtuales ────────────────────────────────────
+  /** Lista los perfiles con su dispositivo vinculado (si existe). */
   async listSensors(tenantId: string) {
     const res = await this.db.query(
-      'SELECT * FROM sim_sensors WHERE tenant_id = $1 ORDER BY name ASC',
+      `SELECT s.*,
+              d.id AS device_id,
+              d.enabled AS device_enabled,
+              d.visible AS device_visible,
+              CASE WHEN d.id IS NULL THEN false ELSE true END AS linked
+       FROM sim_sensors s
+       LEFT JOIN devices d ON d.dev_eui = s.dev_eui AND d.tenant_id = s.tenant_id
+       WHERE s.tenant_id = $1
+       ORDER BY s.name ASC`,
       [tenantId],
     );
     return res.rows;
   }
 
+  /**
+   * Crea el perfil y, si no existe, su dispositivo real con el MISMO DevEUI:
+   * así aparece de inmediato en Sensores CORNEA (con su perfil de emisión
+   * asociado) en lugar de esperar al primer uplink.
+   */
   async createSensor(tenantId: string, dto: CreateSimSensorDto) {
     const devEui = await this.resolveDevEui((dto.devEui || '').trim().toUpperCase());
     try {
@@ -133,7 +186,12 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
           dto.enabled ?? true,
         ],
       );
-      await this.syncDeviceThresholds(tenantId, res.rows[0]);
+      await this.ensureLinkedDevice(tenantId, res.rows[0]);
+      await this.syncDeviceSettings(tenantId, res.rows[0]);
+      // Primera muestra inmediata: el sensor aparece "conectado" en segundos
+      // en vez de esperar al siguiente ciclo del simulador.
+      const state = await this.getState(tenantId);
+      if (state?.enabled) await this.emitNow(res.rows[0].id);
       return res.rows[0];
     } catch (err) {
       if (err?.code === '23505') throw new ConflictException(`El DevEUI ${devEui} ya existe`);
@@ -187,7 +245,13 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
         next.enabled,
       ],
     );
-    await this.syncDeviceThresholds(tenantId, res.rows[0]);
+    await this.ensureLinkedDevice(tenantId, res.rows[0]);
+    await this.syncDeviceSettings(tenantId, res.rows[0]);
+    // Si el perfil se acaba de activar o el sensor estaba off, muestra inmediata.
+    if (dto.enabled === true || dto.enabled === false) {
+      const state = await this.getState(tenantId);
+      if (state?.enabled) await this.emitNow(res.rows[0].id);
+    }
     return res.rows[0];
   }
 
@@ -200,8 +264,50 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
     return { success: true };
   }
 
-  /** Propaga los umbrales del perfil al dispositivo real si ya existe. */
-  private async syncDeviceThresholds(tenantId: string, sim: any) {
+  /**
+   * Si el perfil no tiene dispositivo, lo crea (activo y visible) con el mismo
+   * DevEUI: así aparece de inmediato en Sensores CORNEA en vez de esperar al
+   * primer uplink (y se evitan sensores duplicados por nombre).
+   */
+  private async ensureLinkedDevice(tenantId: string, sim: any) {
+    const existing = await this.db.query(
+      'SELECT id FROM devices WHERE dev_eui = $1 AND tenant_id = $2',
+      [sim.dev_eui, tenantId],
+    );
+    if (existing.rows.length > 0) return existing.rows[0];
+
+    const created = await this.db.query(
+      `INSERT INTO devices (
+         tenant_id, dev_eui, name, description, group_name, latitude, longitude,
+         pressure, humidity_min_threshold, humidity_max_threshold,
+         battery_threshold, enabled, visible, last_seen_at
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,true,true,now())
+       ON CONFLICT (dev_eui) DO UPDATE SET
+         name = EXCLUDED.name,
+         latitude = COALESCE(EXCLUDED.latitude, devices.latitude),
+         longitude = COALESCE(EXCLUDED.longitude, devices.longitude),
+         pressure = COALESCE(EXCLUDED.pressure, devices.pressure),
+         updated_at = now()
+       RETURNING *`,
+      [
+        tenantId,
+        sim.dev_eui,
+        sim.name,
+        'Sensor virtual del simulador de datos de prueba',
+        'Simulación',
+        sim.latitude ?? null,
+        sim.longitude ?? null,
+        sim.base_pressure ?? null,
+        Number(sim.humidity_min_threshold),
+        Number(sim.humidity_max_threshold),
+        Number(sim.battery_threshold),
+      ],
+    );
+    return created.rows[0];
+  }
+
+  /** Propaga al dispositivo vinculado los datos y umbrales del perfil. */
+  private async syncDeviceSettings(tenantId: string, sim: any) {
     await this.db.query(
       `UPDATE devices SET humidity_min_threshold = $3, humidity_max_threshold = $4,
         battery_threshold = $5, updated_at = now()
@@ -216,13 +322,19 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  /**
+   * DevEUI del perfil. Solo se rechaza si ya existe OTRO perfil de simulación:
+   * que exista un dispositivo real es justo el caso de "vincular a un sensor
+   * existente" (no debe dar error).
+   */
   private async resolveDevEui(candidate: string): Promise<string> {
     if (candidate) {
-      const dup = await this.db.query(
-        'SELECT id FROM sim_sensors WHERE dev_eui = $1 UNION SELECT id FROM devices WHERE dev_eui = $1 LIMIT 1',
-        [candidate],
-      );
-      if (dup.rows.length > 0) throw new ConflictException(`El DevEUI ${candidate} ya existe`);
+      const dup = await this.db.query('SELECT id FROM sim_sensors WHERE dev_eui = $1 LIMIT 1', [
+        candidate,
+      ]);
+      if (dup.rows.length > 0) {
+        throw new ConflictException(`El DevEUI ${candidate} ya tiene un perfil de simulación`);
+      }
       return candidate;
     }
     const { randomBytes } = await import('crypto');
@@ -255,7 +367,12 @@ export class SimService implements OnModuleInit, OnModuleDestroy {
       this.ensureClient();
       for (const st of states.rows) {
         const sensors = await this.db.query(
-          'SELECT * FROM sim_sensors WHERE tenant_id = $1 AND enabled = true ORDER BY name ASC',
+          `SELECT s.*, d.enabled AS device_enabled
+           FROM sim_sensors s
+           LEFT JOIN devices d ON d.dev_eui = s.dev_eui AND d.tenant_id = s.tenant_id
+           WHERE s.tenant_id = $1 AND s.enabled = true
+             AND (d.id IS NULL OR d.enabled = true)
+           ORDER BY s.name ASC`,
           [st.tenant_id],
         );
         for (const s of sensors.rows) {

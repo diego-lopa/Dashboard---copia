@@ -41,6 +41,8 @@ export function deviceStatusLabel(status: string | undefined, t: (key: string) =
       return t('dev_critical');
     case 'offline':
       return t('dev_offline');
+    case 'disabled':
+      return t('dev_disabled');
     default:
       return status ?? '--';
   }

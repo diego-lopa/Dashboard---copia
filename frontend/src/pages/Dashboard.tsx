@@ -56,13 +56,17 @@ export const Dashboard: React.FC = () => {
       ]);
       const devs: Device[] = devsRes.data;
       setDevices(devs);
-      // Solo incidentes de sensores activos: los desactivados no existen en el panel
-      const enabledIds = new Set(devs.filter((d: Device) => d.enabled !== false).map((d: Device) => d.id));
+      // Solo incidentes de sensores MOSTRADOS (activos y visibles): el criterio
+      // se aplica ya en la carga para que carga y render coincidan (si no, una
+      // alerta de un sensor oculto cargaba pero no se veía).
+      const shownIds = new Set(
+        devs.filter((d: Device) => d.enabled !== false && d.visible !== false).map((d: Device) => d.id),
+      );
       setAlerts(
         alertsRes.data.filter((a: AlertEvent) => {
           if (a.state !== 'triggered') return false;
           const aid = (a as any).device_id ?? (a as any).deviceId;
-          return aid ? enabledIds.has(aid) : true;
+          return aid ? shownIds.has(aid) : true;
         }),
       );
     } catch (err) {

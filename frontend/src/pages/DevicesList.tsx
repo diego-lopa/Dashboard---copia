@@ -39,30 +39,26 @@ export const DevicesList: React.FC = () => {
 
   const dateLocale = language === 'en' ? enUS : es;
 
-  // Mostrar/ocultar sondas (solo admin): preferencia en servidor (`visible`),
-  // coherente en toda la app y para todos los usuarios. Sin localStorage:
-  // cada cambio se confirma contra la API y el estado refleja la respuesta.
-  const [visibilityBusy, setVisibilityBusy] = useState(false);
-  const [visibilityError, setVisibilityError] = useState<string | null>(null);
+  // Activar/desactivar el sensor (ingesta): se hace pulsando su nombre en la
+// lista. Al desactivar, el sensor deja de ingerir y el simulador de datos de
+// prueba pausa su emisión (ver sim.service). El backend devuelve el
+// dispositivo con `status` recalculado, así que la fila se actualiza sola.
+const [toggleBusyId, setToggleBusyId] = useState<string | null>(null);
+const [rowError, setRowError] = useState<string | null>(null);
 
-  const effectiveVisibleIds = new Set(devices.filter((d) => d.visible !== false).map((d) => d.id));
-
-  const applyVisibility = async (targets: Device[], visible: boolean) => {
-    if (targets.length === 0) return;
-    setVisibilityBusy(true);
-    setVisibilityError(null);
-    try {
-      const updated = await Promise.all(
-        targets.map((d) => apiClient.patch(`/devices/${d.id}/visibility`, { visible })),
-      );
-      const byId = new Map(updated.map((r) => [(r.data as Device).id, r.data as Device]));
-      setDevices((prev) => prev.map((d) => byId.get(d.id) ?? d));
-    } catch (err: any) {
-      setVisibilityError(err?.response?.data?.message || t('test_error'));
-    } finally {
-      setVisibilityBusy(false);
-    }
-  };
+const applyEnabled = async (dev: Device, enabled: boolean) => {
+  setToggleBusyId(dev.id);
+  setRowError(null);
+  try {
+    const res = await apiClient.patch(`/devices/${dev.id}`, { enabled });
+    const updated = res.data as Device;
+    setDevices((prev) => prev.map((d) => (d.id === dev.id ? { ...d, ...updated } : d)));
+  } catch (err: any) {
+    setRowError(err?.response?.data?.message || t('test_error'));
+  } finally {
+    setToggleBusyId(null);
+  }
+};
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -83,7 +79,7 @@ export const DevicesList: React.FC = () => {
   const [geoLoading, setGeoLoading] = useState(false);
   const [geoNotice, setGeoNotice] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
+    const [deleteTarget, setDeleteTarget] = useState<{ id: string; name: string } | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -159,6 +155,39 @@ export const DevicesList: React.FC = () => {
     }
   };
 
+  /**
+   * Geocodificación por NOMBRE vía backend (proxy de Nominatim + Open-Meteo):
+   * rellena lugar, coordenadas y presión del sitio. Todo queda editable.
+   */
+  const searchGeoByPlace = async () => {
+    const place = formData.placeName?.trim();
+    if (!place) {
+      setGeoNotice('Introduce el nombre del lugar');
+      return;
+    }
+    setGeoLoading(true);
+    setGeoNotice(null);
+    try {
+      const res = await apiClient.get('/system/geocode', { params: { place } });
+      if (!res.data?.found) {
+        setGeoNotice('No se encontró esa localización');
+        return;
+      }
+      setFormData((prev) => ({
+        ...prev,
+        placeName: res.data.place ?? prev.placeName,
+        latitude: String(res.data.latitude ?? ''),
+        longitude: String(res.data.longitude ?? ''),
+        ...(res.data.pressure != null ? { pressure: String(res.data.pressure) } : {}),
+      }));
+      setGeoNotice(t('geocode_fill_hint'));
+    } catch (err: any) {
+      setGeoNotice(err?.response?.data?.message || 'No se pudo consultar el servicio geográfico');
+    } finally {
+      setGeoLoading(false);
+    }
+  };
+
   const openEditModal = (dev: Device) => {
     setEditingDevice(dev);
     setFormData({
@@ -200,6 +229,13 @@ export const DevicesList: React.FC = () => {
       } else {
         const trimmedEui = formData.devEui.trim();
         if (trimmedEui) payload.devEui = trimmedEui.toUpperCase();
+        // El backend crea además el perfil del Simulador de datos de prueba
+        // con el mismo DevEUI (createSimProfile por defecto = true), así que
+        // el sensor nace con datos que generar desde el primer momento.
+        payload.createSimProfile = true;
+        payload.simBaseNeutrons = 30;
+        payload.simAnomalyMode = 'none';
+        payload.simAnomalyEvery = 20;
         await apiClient.post('/devices', payload);
       }
 
@@ -245,6 +281,14 @@ export const DevicesList: React.FC = () => {
           <p className={`text-xs mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
             {t('sensors_subtitle')}
           </p>
+          {rowError && (
+            <p className="text-[11px] mt-1 text-rose-500">{rowError}</p>
+          )}
+          {user?.role !== 'viewer' && devices.length > 0 && (
+            <p className={`text-[11px] mt-1 ${isDark ? 'text-slate-500' : 'text-slate-500'}`}>
+              {t('sensors_click_hint')}
+            </p>
+          )}
         </div>
 
         {user?.role !== 'viewer' && (
@@ -257,50 +301,6 @@ export const DevicesList: React.FC = () => {
           </button>
         )}
       </div>
-
-      {/* Mostrar/ocultar sondas — solo admin. Persistido en servidor, coherente
-          en toda la app y para todos los usuarios (mapas y dashboard omiten
-          las ocultas/desactivadas) */}
-      {user?.role === 'admin' && devices.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          {devices.map((d) => {
-            const active = effectiveVisibleIds.has(d.id);
-            return (
-              <button
-                key={d.id}
-                disabled={visibilityBusy}
-                onClick={() => applyVisibility([d], !active)}
-                className={`px-3 py-1.5 rounded-full text-xs font-medium border transition disabled:opacity-50 ${
-                  active
-                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30'
-                    : isDark
-                    ? 'bg-slate-800 border-slate-700 text-slate-500'
-                    : 'bg-slate-100 border-slate-300 text-slate-500'
-                }`}
-              >
-                {active ? '● ' : '○ '}
-                {d.name}
-              </button>
-            );
-          })}
-          <button
-            disabled={visibilityBusy}
-            onClick={() =>
-              effectiveVisibleIds.size === 0
-                ? applyVisibility(devices, true)
-                : applyVisibility(devices, false)
-            }
-            className={`px-3 py-1.5 rounded-full text-xs font-medium border transition disabled:opacity-50 ${
-              isDark ? 'bg-slate-800 border-slate-700 text-slate-400 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {(effectiveVisibleIds.size === 0 ? t('show_all') : effectiveVisibleIds.size === devices.length ? t('hide_all') : t('show_all'))}
-          </button>
-          {visibilityError && (
-            <span className="text-xs text-rose-500">{visibilityError}</span>
-          )}
-        </div>
-      )}
 
       {/* Filters Bar */}
       <div className="glass-panel p-4 rounded-2xl border flex flex-col md:flex-row items-center gap-4">
@@ -384,15 +384,70 @@ export const DevicesList: React.FC = () => {
                 const isLow = humidity <= dev.humidity_min_threshold;
 
                 return (
-                  <tr key={dev.id} className={`transition ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
+                  <tr
+                  key={dev.id}
+                  className={`transition ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'} ${
+                    dev.enabled === false ? 'opacity-60' : ''
+                  }`}
+                >
                     <td className="py-3.5 px-4">
                       <div className="flex items-center space-x-2.5">
-                        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center flex-shrink-0">
+                        <div
+                          className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition ${
+                            dev.enabled === false
+                              ? isDark
+                                ? 'bg-slate-800 text-slate-600'
+                                : 'bg-slate-200 text-slate-400'
+                              : 'bg-emerald-500/10 text-emerald-400'
+                          }`}
+                        >
                           <Cpu className="w-4 h-4" />
                         </div>
-                        <div>
-                          <p className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>{dev.name}</p>
-                          <p className={`font-mono text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>{dev.dev_eui}</p>
+                        <div className="min-w-0">
+                          {user?.role !== 'viewer' ? (
+                            <button
+                              type="button"
+                              onClick={() => applyEnabled(dev, dev.enabled === false)}
+                              disabled={toggleBusyId === dev.id}
+                              title={
+                                dev.enabled === false
+                                  ? t('sensor_activate_hint')
+                                  : t('sensor_deactivate_hint')
+                              }
+                              className={`text-left font-semibold transition hover:underline disabled:opacity-50 ${
+                                dev.enabled === false
+                                  ? isDark
+                                    ? 'text-slate-500'
+                                    : 'text-slate-400'
+                                  : isDark
+                                  ? 'text-white hover:text-emerald-400'
+                                  : 'text-slate-900 hover:text-emerald-600'
+                              }`}
+                            >
+                              {dev.name}
+                            </button>
+                          ) : (
+                            <p
+                              className={`font-semibold ${
+                                dev.enabled === false
+                                  ? isDark
+                                    ? 'text-slate-500'
+                                    : 'text-slate-400'
+                                  : isDark
+                                  ? 'text-white'
+                                  : 'text-slate-900'
+                              }`}
+                            >
+                              {dev.name}
+                            </p>
+                          )}
+                          <p
+                            className={`font-mono text-[10px] ${
+                              isDark ? 'text-slate-400' : 'text-slate-600'
+                            }`}
+                          >
+                            {dev.dev_eui}
+                          </p>
                         </div>
                       </div>
                     </td>
@@ -580,15 +635,30 @@ export const DevicesList: React.FC = () => {
                 <label className={`block text-xs font-semibold mb-1 ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
                   {t('place_name')}
                 </label>
-                <input
-                  type="text"
-                  value={formData.placeName}
-                  onChange={(e) => setFormData({ ...formData, placeName: e.target.value })}
-                  placeholder={t('place_name_placeholder')}
-                  className={`w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-emerald-500 ${
-                    isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
-                  }`}
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={formData.placeName}
+                    onChange={(e) => setFormData({ ...formData, placeName: e.target.value })}
+                    placeholder={t('place_name_placeholder')}
+                    className={`flex-1 px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-emerald-500 ${
+                      isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={searchGeoByPlace}
+                    disabled={geoLoading}
+                    title={t('geocode_fill_hint')}
+                    className={`px-3 py-2 rounded-xl border text-xs font-medium whitespace-nowrap transition disabled:opacity-50 ${
+                      isDark
+                        ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white'
+                        : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                    }`}
+                  >
+                    {geoLoading ? t('fetching') : t('geocode_search_btn')}
+                  </button>
+                </div>
               </div>
 
               <div>
@@ -614,7 +684,7 @@ export const DevicesList: React.FC = () => {
                     step="any"
                     value={formData.latitude}
                     onChange={(e) => setFormData({ ...formData, latitude: e.target.value })}
-                    placeholder="40.4168"
+                    placeholder="42.8782"
                     className={`w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-emerald-500 ${
                       isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                     }`}
@@ -627,7 +697,7 @@ export const DevicesList: React.FC = () => {
                     step="any"
                     value={formData.longitude}
                     onChange={(e) => setFormData({ ...formData, longitude: e.target.value })}
-                    placeholder="-3.7038"
+                    placeholder="-8.5448"
                     className={`w-full px-3 py-2 border rounded-xl text-xs focus:outline-none focus:border-emerald-500 ${
                       isDark ? 'bg-slate-800 border-slate-700 text-white' : 'bg-slate-50 border-slate-300 text-slate-900'
                     }`}

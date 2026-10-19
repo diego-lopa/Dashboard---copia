@@ -35,7 +35,7 @@ export interface Device {
   latest_gateway?: string;
   /** Último recuento bruto de neutrones CRNS (n/s). */
   latest_neutron_counts?: number;
-  status: 'online' | 'warning' | 'critical' | 'offline';
+  status: 'online' | 'warning' | 'critical' | 'offline' | 'disabled';
   active_alerts?: number;
 }
 

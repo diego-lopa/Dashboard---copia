@@ -1,7 +1,8 @@
-import { Injectable, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, Optional } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { DatabaseService } from '../../database/database.service';
 import { CreateDeviceDto, UpdateDeviceDto, UpdateDeviceVisibilityDto } from './dto/create-device.dto';
+import { SimService } from '../sim/sim.service';
 import { DeviceEntity } from '../../shared/types';
 
 @Injectable()
@@ -9,6 +10,7 @@ export class DevicesService {
   constructor(
     private readonly db: DatabaseService,
     private readonly configService: ConfigService,
+    @Optional() private readonly simService?: SimService,
   ) {}
 
   /** Instante a partir del cual una sonda sin datos se considera offline. */
@@ -57,7 +59,7 @@ export class DevicesService {
         ln.latest_neutron_counts,
         COALESCE(ac.alert_count, 0)::int as active_alerts,
         CASE
-          WHEN NOT d.enabled THEN 'offline'
+          WHEN NOT d.enabled THEN 'disabled'
           WHEN d.last_seen_at IS NULL OR d.last_seen_at < $2::timestamptz THEN 'offline'
           WHEN COALESCE(ac.alert_count, 0) > 0 THEN 'warning'
           -- Batería baja con la misma semántica que frontend/backend:
@@ -123,7 +125,7 @@ export class DevicesService {
         ln.latest_neutron_counts,
         COALESCE(ac.alert_count, 0)::int as active_alerts,
         CASE
-          WHEN NOT d.enabled THEN 'offline'
+          WHEN NOT d.enabled THEN 'disabled'
           WHEN d.last_seen_at IS NULL OR d.last_seen_at < $3::timestamptz THEN 'offline'
           WHEN COALESCE(ac.alert_count, 0) > 0 THEN 'warning'
           -- Batería baja con la misma semántica que frontend/backend:
@@ -214,7 +216,59 @@ export class DevicesService {
       dto.humidityMaxThreshold ?? 85.0,
     ]);
 
-    return res.rows[0];
+    // Cada sensor registrado nace también con su perfil del Simulador de datos
+    // de prueba (mismo DevEUI), para que tenga datos que generar desde el
+    // primer momento. Se puede excluir con createSimProfile=false.
+    if (dto.createSimProfile !== false) {
+      await this.createSimProfile(tenantId, res.rows[0], dto);
+    }
+
+    return this.findOne(res.rows[0].id, tenantId);
+  }
+
+  /** Perfil de simulación asociado al sensor recién creado (idempotente). */
+  private async createSimProfile(tenantId: string, dev: any, dto: CreateDeviceDto) {
+    try {
+      const res = await this.db.query(
+        `INSERT INTO sim_sensors (
+           tenant_id, name, dev_eui, base_neutrons, base_temp, base_battery, base_pressure,
+           latitude, longitude, anomaly_mode, anomaly_every,
+           humidity_min_threshold, humidity_max_threshold, battery_threshold, enabled
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+         ON CONFLICT (dev_eui) DO NOTHING
+         RETURNING id;`,
+        [
+          tenantId,
+          dev.name,
+          dev.dev_eui,
+          dto.simBaseNeutrons ?? 30.0,
+          19.0,
+          3.9,
+          dev.pressure ?? 1012.0,
+          dev.latitude ?? null,
+          dev.longitude ?? null,
+          dto.simAnomalyMode ?? 'none',
+          dto.simAnomalyEvery ?? 20,
+          Number(dev.humidity_min_threshold ?? 15.0),
+          Number(dev.humidity_max_threshold ?? 85.0),
+          Number(dev.battery_threshold ?? 20.0),
+          true,
+        ],
+      );
+
+      // Si el simulador está activo, primera muestra INMEDIATA: el sensor
+      // aparece conectado en segundos en vez de esperar al próximo ciclo
+      // (que con cadencia de 30 min sería media hora).
+      if (res.rows[0]?.id && this.simService) {
+        const state = await this.db.query(
+          'SELECT enabled FROM sim_state WHERE tenant_id = $1',
+          [tenantId],
+        );
+        if (state.rows[0]?.enabled) await this.simService.emitNow(res.rows[0].id);
+      }
+    } catch {
+      // El alta del sensor no debe fallar si el perfil no se puede crear.
+    }
   }
 
   async update(id: string, tenantId: string, dto: UpdateDeviceDto) {
@@ -276,23 +330,60 @@ export class DevicesService {
       RETURNING *;
     `;
     const res = await this.db.query(query, values);
-    return res.rows[0];
+    const device = res.rows[0];
+
+    // Reactivar un sensor reanuda sus datos de prueba de inmediato: el bucle
+    // del simulador lo pausaba mientras estaba desactivado, así que sin esta
+    // muestra el sensor volvería "En línea" sin datos hasta el próximo ciclo
+    // (con cadencia de 30 min, casi media hora de valores a null).
+    if (dto.enabled === true) {
+      await this.resumeSimulation(tenantId, device.dev_eui);
+    }
+
+    // Se devuelve el dispositivo ENRIQUECIDO (con `status` calculado) para que el
+    // frontend actualice la fila al instante tras activar/desactivar/editar.
+    return this.findOne(device.id, tenantId);
+  }
+
+  /** Emite una muestra inmediata del perfil de simulación del sensor, si aplica. */
+  private async resumeSimulation(tenantId: string, devEui: string): Promise<void> {
+    if (!this.simService) return;
+    try {
+      const sim = await this.db.query(
+        'SELECT id FROM sim_sensors WHERE tenant_id = $1 AND dev_eui = $2',
+        [tenantId, devEui],
+      );
+      if (!sim.rows[0]?.id) return; // sensor real, sin generador asociado
+      const state = await this.db.query(
+        'SELECT enabled FROM sim_state WHERE tenant_id = $1',
+        [tenantId],
+      );
+      if (state.rows[0]?.enabled) await this.simService.emitNow(sim.rows[0].id);
+    } catch {
+      // Reanudar la simulación nunca debe fallar la actualización del sensor.
+    }
   }
 
   /** Visibilidad display-only (solo admin): no toca ingesta ni umbrales. */
   async updateVisibility(id: string, tenantId: string, dto: UpdateDeviceVisibilityDto) {
     await this.findOne(id, tenantId);
-    const res = await this.db.query(
+    await this.db.query(
       `UPDATE devices SET visible = $3, updated_at = now()
-       WHERE id = $1 AND tenant_id = $2 RETURNING *;`,
+       WHERE id = $1 AND tenant_id = $2;`,
       [id, tenantId, dto.visible],
     );
-    return res.rows[0];
+    return this.findOne(id, tenantId);
   }
 
   async delete(id: string, tenantId: string) {
-    await this.findOne(id, tenantId);
+    const dev = await this.findOne(id, tenantId);
+    // Borrar el sensor también retira su perfil del Simulador de datos de
+    // prueba (mismo DevEUI) para no dejar generadores huérfanos.
+    await this.db.query(
+      'DELETE FROM sim_sensors WHERE dev_eui = $1 AND tenant_id = $2',
+      [dev.dev_eui, tenantId],
+    );
     await this.db.query('DELETE FROM devices WHERE id = $1 AND tenant_id = $2', [id, tenantId]);
-    return { success: true, message: 'Dispositivo y su telemetría eliminados' };
+    return { success: true, message: 'Dispositivo, su simulador de datos de prueba y su telemetría eliminados' };
   }
 }

@@ -17,6 +17,10 @@ const STATUS_COLOR: Record<string, string> = {
   offline: '#64748B',
 };
 
+// Centro por defecto: Santiago de Compostela (red CORNEA en Galicia),
+// no el centro de la península.
+const DEFAULT_CENTER: [number, number] = [42.8782, -8.5448];
+
 export const SensorMap: React.FC<SensorMapProps> = ({ devices, height = '300px' }) => {
   const { theme } = useTheme();
   const { t } = useLanguage();
@@ -39,7 +43,7 @@ export const SensorMap: React.FC<SensorMapProps> = ({ devices, height = '300px' 
   );
 
   const center: [number, number] = useMemo(() => {
-    if (withCoords.length === 0) return [40.4168, -3.7038];
+    if (withCoords.length === 0) return DEFAULT_CENTER;
     const lat = withCoords.reduce((s, d) => s + (d.latitude || 0), 0) / withCoords.length;
     const lon = withCoords.reduce((s, d) => s + (d.longitude || 0), 0) / withCoords.length;
     return [lat, lon];
