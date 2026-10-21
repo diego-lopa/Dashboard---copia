@@ -249,28 +249,30 @@ export const Dashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Sensores en Alerta */}
+        {/* Sensores en Alerta — granate oscuro (distinto del rojo suave y del ámbar) */}
         <div className="glass-card p-4 rounded-2xl border flex items-center justify-between">
           <div>
             <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
               {t('in_alert')}
             </p>
-            <p className="text-2xl font-bold text-rose-400 mt-1">{warningSensors}</p>
+            <p className="text-2xl font-bold text-rose-800 dark:text-rose-600 mt-1">{warningSensors}</p>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-rose-500/10 text-rose-400 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl bg-rose-500/15 text-rose-800 dark:text-rose-600 flex items-center justify-center">
             <AlertTriangle className="w-5 h-5" />
           </div>
         </div>
 
-        {/* Batería Baja */}
+        {/* Batería Baja — número en gris neutro (igual que el número "Offline"), sin
+            rayas: ya no compite con el violeta de los neutrones ni con el ámbar
+            de la temperatura. El icono sí conserva el patrón de rayas. */}
         <div className="glass-card p-4 rounded-2xl border flex items-center justify-between">
           <div>
             <p className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
               {t('low_battery')}
             </p>
-            <p className="text-2xl font-bold text-amber-400 mt-1">{lowBatterySensors}</p>
+            <p className="text-2xl font-bold text-slate-600 dark:text-slate-400 mt-1">{lowBatterySensors}</p>
           </div>
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-400 flex items-center justify-center">
+          <div className="w-10 h-10 rounded-xl kpi-stripe-bg text-slate-600 dark:text-white flex items-center justify-center">
             <BatteryWarning className="w-5 h-5" />
           </div>
         </div>

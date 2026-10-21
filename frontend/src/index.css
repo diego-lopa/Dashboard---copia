@@ -199,4 +199,47 @@
   .bg-gradient-brand {
     @apply bg-gradient-to-br from-emerald-500 via-cyan-500 to-blue-500;
   }
+
+  /* Número con patrón de RAYAS rojo/gris (aviso de batería baja): el texto se
+     rellena con el degradado en vez de un color sólido, así no compite con el
+     violeta de los neutrones ni con el ámbar de la temperatura.
+     · Rojo pálido fijo en ambos temas: rgb(252,165,165) = #fca5a5.
+     · Gris = fondo del icono "Offline": #e2e8f0 (claro) / #334155 (oscuro, algo más claro). */
+  .kpi-stripe-warn {
+    background-image: repeating-linear-gradient(
+      45deg,
+      #fca5a5 0 7px,
+      #e2e8f0 7px 14px
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .dark .kpi-stripe-warn {
+    background-image: repeating-linear-gradient(
+      45deg,
+      #fca5a5 0 7px,
+      #334155 7px 14px
+    );
+  }
+
+  /* Alternativa: relleno de un color con BORDE de otro (-webkit-text-stroke). */
+  .kpi-stroke-warn {
+    color: #fca5a5;
+    -webkit-text-stroke: 1.5px #e2e8f0;
+  }
+  .dark .kpi-stroke-warn {
+    color: #fca5a5;
+    -webkit-text-stroke: 1.5px #1e293b;
+  }
+
+  /* Mismo patrón de rayas aplicado al FONDO del icono (no al SVG: el recorte a
+     texto solo funciona con tipografía). El icono usa el color neutro del icono
+     "Offline" (slate-600 / slate-400) para contrastar sobre las rayas. */
+  .kpi-stripe-bg {
+    background-image: repeating-linear-gradient(45deg, #fca5a5 0 7px, #e2e8f0 7px 14px);
+  }
+  .dark .kpi-stripe-bg {
+    background-image: repeating-linear-gradient(45deg, #fca5a5 0 7px, #334155 7px 14px);
+  }
 }
