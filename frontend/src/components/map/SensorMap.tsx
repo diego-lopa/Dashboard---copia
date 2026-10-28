@@ -94,7 +94,9 @@ export const SensorMap: React.FC<SensorMapProps> = ({ devices, height = '300px' 
         markerZoomAnimation={true}
         attributionControl={false}
       >
-        <AttributionControl prefix={false} />
+        <AttributionControl
+          prefix='<a href="https://leafletjs.com" target="_blank" rel="noopener noreferrer">Leaflet</a>'
+        />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="/osm/{z}/{x}/{y}.png"
