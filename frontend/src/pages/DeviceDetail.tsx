@@ -17,6 +17,9 @@ import {
   Radio,
   MapPin,
   Zap,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { format, subHours, subDays } from 'date-fns';
 import { formatDateTime } from '../utils/dates';
@@ -39,6 +42,59 @@ export const DeviceDetail: React.FC = () => {
   // backend devuelve como máximo los 5000 más recientes.
   const [timeRange, setTimeRange] = useState<string>('24h');
   const interval = 'raw';
+
+  // Ordenación de la tabla de histórico (solo presentación, no modifica datos).
+  // Por defecto: fecha/hora descendente (más recientes arriba).
+  type SortKey = 'time' | 'humidity' | 'neutrons' | 'temperature' | 'battery' | 'pressure' | 'rssi' | 'samples';
+  const [sortKey, setSortKey] = useState<SortKey>('time');
+  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('desc');
+    }
+  };
+
+  const rowValue = (row: TelemetryPoint, key: SortKey): number | string | null => {
+    switch (key) {
+      case 'time':
+        return new Date(row.bucket || row.time || 0).getTime();
+      case 'humidity':
+        return row.avg_humidity ?? row.humidity ?? null;
+      case 'neutrons':
+        return row.avg_neutron_counts ?? row.neutron_counts ?? null;
+      case 'temperature':
+        return row.avg_temperature ?? row.temperature ?? null;
+      case 'battery':
+        return row.avg_battery ?? row.battery ?? null;
+      case 'pressure':
+        return row.avg_pressure ?? row.pressure ?? null;
+      case 'rssi':
+        return row.avg_rssi ?? row.rssi ?? null;
+      case 'samples':
+        return row.samples ?? 1;
+      default:
+        return null;
+    }
+  };
+
+  const sortedTelemetry = [...telemetry].sort((a, b) => {
+    const va = rowValue(a, sortKey);
+    const vb = rowValue(b, sortKey);
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1;
+    if (vb === null) return -1;
+    let cmp = 0;
+    if (typeof va === 'string' && typeof vb === 'string') {
+      cmp = va.localeCompare(vb);
+    } else {
+      cmp = Number(va) - Number(vb);
+    }
+    return sortDir === 'asc' ? cmp : -cmp;
+  });
 
   // Unidad de presión (hPa/atm): solo presentación, se calcula al hacer clic,
   // no se almacena nada doble en BD. 1 atm = 1013.25 hPa.
@@ -416,18 +472,39 @@ export const DeviceDetail: React.FC = () => {
           <table className={`w-full text-left text-xs ${isDark ? 'text-slate-300' : 'text-slate-800'}`}>
             <thead className={`sticky top-0 text-[10px] uppercase border-b ${isDark ? 'bg-slate-900 text-slate-400 border-slate-800' : 'bg-slate-100 text-slate-700 border-slate-200'}`}>
               <tr>
-                <th className="py-2.5 px-4 whitespace-nowrap">{t('date_time_utc')}</th>
-                <th className="py-2.5 px-4 whitespace-nowrap">{t('soil_moisture')}</th>
-                <th className="py-2.5 px-4 whitespace-nowrap">{t('neutrons_col')}</th>
-                <th className="py-2.5 px-4 whitespace-nowrap">{t('temperature')}</th>
-                <th className="py-2.5 px-4">{t('battery')}</th>
-                <th className="py-2.5 px-4">{t('pressure_label')}</th>
-                <th className="py-2.5 px-4">RSSI</th>
-                <th className="py-2.5 px-4">{t('samples_label')}</th>
+                {[
+                  { key: 'time' as SortKey, label: t('date_time_utc') },
+                  { key: 'humidity' as SortKey, label: t('soil_moisture') },
+                  { key: 'neutrons' as SortKey, label: t('neutrons_col') },
+                  { key: 'temperature' as SortKey, label: t('temperature') },
+                  { key: 'battery' as SortKey, label: t('battery') },
+                  { key: 'pressure' as SortKey, label: t('pressure_label') },
+                  { key: 'rssi' as SortKey, label: 'RSSI' },
+                  { key: 'samples' as SortKey, label: t('samples_label') },
+                ].map((col) => (
+                  <th
+                    key={col.key}
+                    onClick={() => handleSort(col.key)}
+                    className="py-2.5 px-4 whitespace-nowrap cursor-pointer select-none hover:opacity-80"
+                  >
+                    <span className="inline-flex items-center gap-1">
+                      {col.label}
+                      {sortKey === col.key ? (
+                        sortDir === 'asc' ? (
+                          <ArrowUp className="w-3 h-3" />
+                        ) : (
+                          <ArrowDown className="w-3 h-3" />
+                        )
+                      ) : (
+                        <ArrowUpDown className="w-3 h-3 opacity-40" />
+                      )}
+                    </span>
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className={`divide-y ${isDark ? 'divide-slate-800' : 'divide-slate-200'}`}>
-              {telemetry.slice(0, 100).map((row, idx) => (
+              {sortedTelemetry.slice(0, 100).map((row, idx) => (
                 <tr key={idx} className={`transition ${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50'}`}>
                   <td className={`py-2 px-4 font-mono text-[11px] ${isDark ? 'text-white' : 'text-slate-900'}`}>
                     {formatDateTime(row.bucket || row.time || '', 'yyyy-MM-dd HH:mm:ss')}

@@ -45,6 +45,7 @@ export const DevicesList: React.FC = () => {
 // dispositivo con `status` recalculado, así que la fila se actualiza sola.
 const [toggleBusyId, setToggleBusyId] = useState<string | null>(null);
 const [rowError, setRowError] = useState<string | null>(null);
+const [toggleTarget, setToggleTarget] = useState<{ dev: Device; enabled: boolean } | null>(null);
 
 const applyEnabled = async (dev: Device, enabled: boolean) => {
   setToggleBusyId(dev.id);
@@ -302,6 +303,50 @@ const applyEnabled = async (dev: Device, enabled: boolean) => {
         )}
       </div>
 
+      {/* Lista rápida de activación/desactivación de sensores */}
+      {devices.length > 0 && (
+        <div className="glass-panel p-4 rounded-2xl border space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              {t('sensor_quick_toggle_title')}
+            </h3>
+            {user?.role !== 'viewer' && (
+              <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                {t('sensor_quick_toggle_hint')}
+              </p>
+            )}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {devices.map((dev) => {
+              const active = dev.enabled !== false;
+              return (
+                <button
+                  key={dev.id}
+                  type="button"
+                  disabled={user?.role === 'viewer' || toggleBusyId === dev.id}
+                  onClick={() => {
+                    if (user?.role === 'viewer') return;
+                    setToggleTarget({ dev, enabled: !active });
+                  }}
+                  className={`px-3 py-1.5 rounded-full border text-xs font-medium transition ${
+                    active
+                      ? isDark
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/40 hover:bg-emerald-500/25'
+                        : 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                      : isDark
+                      ? 'bg-slate-800/60 text-slate-500 border-slate-700 opacity-60 hover:opacity-80'
+                      : 'bg-slate-100 text-slate-400 border-slate-200 opacity-60 hover:opacity-80'
+                  } disabled:opacity-40 disabled:cursor-not-allowed`}
+                  title={active ? t('sensor_deactivate_hint') : t('sensor_activate_hint')}
+                >
+                  {dev.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Filters Bar */}
       <div className="glass-panel p-4 rounded-2xl border flex flex-col md:flex-row items-center gap-4">
         {/* Search */}
@@ -404,43 +449,21 @@ const applyEnabled = async (dev: Device, enabled: boolean) => {
                           <Cpu className="w-4 h-4" />
                         </div>
                         <div className="min-w-0">
-                          {user?.role !== 'viewer' ? (
-                            <button
-                              type="button"
-                              onClick={() => applyEnabled(dev, dev.enabled === false)}
-                              disabled={toggleBusyId === dev.id}
-                              title={
-                                dev.enabled === false
-                                  ? t('sensor_activate_hint')
-                                  : t('sensor_deactivate_hint')
-                              }
-                              className={`text-left font-semibold transition hover:underline disabled:opacity-50 ${
-                                dev.enabled === false
-                                  ? isDark
-                                    ? 'text-slate-500'
-                                    : 'text-slate-400'
-                                  : isDark
-                                  ? 'text-white hover:text-emerald-400'
-                                  : 'text-slate-900 hover:text-emerald-600'
-                              }`}
-                            >
-                              {dev.name}
-                            </button>
-                          ) : (
-                            <p
-                              className={`font-semibold ${
-                                dev.enabled === false
-                                  ? isDark
-                                    ? 'text-slate-500'
-                                    : 'text-slate-400'
-                                  : isDark
-                                  ? 'text-white'
-                                  : 'text-slate-900'
-                              }`}
-                            >
-                              {dev.name}
-                            </p>
-                          )}
+                          <Link
+                            to={`/devices/${dev.id}`}
+                            className={`font-semibold transition hover:underline ${
+                              dev.enabled === false
+                                ? isDark
+                                  ? 'text-slate-500 hover:text-slate-300'
+                                  : 'text-slate-400 hover:text-slate-600'
+                                : isDark
+                                ? 'text-white hover:text-emerald-400'
+                                : 'text-slate-900 hover:text-emerald-600'
+                            }`}
+                            title={t('full_detail')}
+                          >
+                            {dev.name}
+                          </Link>
                           <p
                             className={`font-mono text-[10px] ${
                               isDark ? 'text-slate-400' : 'text-slate-600'
@@ -788,6 +811,61 @@ const applyEnabled = async (dev: Device, enabled: boolean) => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal confirmar activación/desactivación de sensor */}
+      {toggleTarget && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className={`w-full max-w-md rounded-3xl p-6 border shadow-2xl space-y-4 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 text-slate-900'}`}>
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
+                  toggleTarget.enabled
+                    ? 'bg-emerald-500/15 text-emerald-500'
+                    : 'bg-slate-500/15 text-slate-500'
+                }`}
+              >
+                <Cpu className="w-5 h-5" />
+              </div>
+              <div className="min-w-0">
+                <h3 className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                  {t('confirm_toggle_title')}
+                </h3>
+                <p className={`text-xs mt-0.5 truncate ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+                  {toggleTarget.enabled ? t('confirm_activate_sensor') : t('confirm_deactivate_sensor')}:{' '}
+                  "{toggleTarget.dev.name}"
+                </p>
+              </div>
+            </div>
+            <div className={`flex items-center justify-end gap-3 pt-4 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+              <button
+                type="button"
+                onClick={() => setToggleTarget(null)}
+                className={`px-4 py-2 rounded-xl border text-xs font-medium transition ${
+                  isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                {t('cancel')}
+              </button>
+              <button
+                type="button"
+                disabled={toggleBusyId === toggleTarget.dev.id}
+                onClick={async () => {
+                  await applyEnabled(toggleTarget.dev, toggleTarget.enabled);
+                  setToggleTarget(null);
+                }}
+                className={`px-4 py-2 rounded-xl text-white font-semibold text-xs shadow-lg transition flex items-center gap-1.5 disabled:opacity-50 ${
+                  toggleTarget.enabled
+                    ? 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-500/20'
+                    : 'bg-slate-500 hover:bg-slate-600 shadow-slate-500/20'
+                }`}
+              >
+                <Check className="w-4 h-4" />
+                <span>{toggleTarget.enabled ? t('confirm_activate_sensor') : t('confirm_deactivate_sensor')}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

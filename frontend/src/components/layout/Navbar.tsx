@@ -106,7 +106,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             }`}
           >
             {t('developed_by')} ·{' '}
-            <span className={isDark ? 'text-cyan-400' : 'text-cyan-600'}>Neutron Insights</span>
+            <a
+              href="https://neutroninsights.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`${isDark ? 'text-cyan-400 hover:text-cyan-300' : 'text-cyan-600 hover:text-cyan-700'} hover:underline`}
+            >
+              Neutron Insights
+            </a>
           </p>
         </div>
       </div>

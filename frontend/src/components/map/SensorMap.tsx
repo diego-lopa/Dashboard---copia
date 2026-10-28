@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, CircleMarker, Popup, AttributionControl, useMap } from 'react-leaflet';
 import { Link } from 'react-router-dom';
 import { Device } from '../../types';
 import { useTheme } from '../../context/ThemeContext';
@@ -20,6 +20,31 @@ const STATUS_COLOR: Record<string, string> = {
 // Centro por defecto: Santiago de Compostela (red CORNEA en Galicia),
 // no el centro de la península.
 const DEFAULT_CENTER: [number, number] = [42.8782, -8.5448];
+
+// Marcador que, al hacer doble clic, acerca el mapa varios niveles hacia el sensor.
+const ZoomableCircleMarker: React.FC<React.ComponentProps<typeof CircleMarker>> = (props) => {
+  const map = useMap();
+  const center = props.center as [number, number];
+  const lat = center[0];
+  const lon = center[1];
+  return (
+    <CircleMarker
+      {...props}
+      eventHandlers={{
+        ...props.eventHandlers,
+        dblclick: (e: any) => {
+          if (e?.originalEvent) {
+            e.originalEvent.stopPropagation();
+            e.originalEvent.preventDefault();
+          }
+          const targetZoom = Math.min(map.getZoom() + 7, 18);
+          map.flyTo([lat, lon], targetZoom, { duration: 1.2, easeLinearity: 0.25 });
+          (props.eventHandlers as any)?.dblclick?.(e);
+        },
+      }}
+    />
+  );
+};
 
 export const SensorMap: React.FC<SensorMapProps> = ({ devices, height = '300px' }) => {
   const { theme } = useTheme();
@@ -56,16 +81,30 @@ export const SensorMap: React.FC<SensorMapProps> = ({ devices, height = '300px' 
         isDark ? 'border-slate-700' : 'border-slate-200'
       }`}
     >
-      <MapContainer center={center} zoom={6} style={{ height: '100%', width: '100%' }} scrollWheelZoom={true}>
+      <MapContainer
+        center={center}
+        zoom={6}
+        minZoom={2}
+        maxZoom={18}
+        maxBounds={[[-90, -180], [90, 180]]}
+        maxBoundsViscosity={1.0}
+        style={{ height: '100%', width: '100%' }}
+        scrollWheelZoom={true}
+        doubleClickZoom={false}
+        markerZoomAnimation={true}
+        attributionControl={false}
+      >
+        <AttributionControl prefix={false} />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="/osm/{z}/{x}/{y}.png"
+          maxZoom={18}
         />
         {withCoords.map((d) => (
-          <CircleMarker
+          <ZoomableCircleMarker
             key={d.id}
             center={[d.latitude as number, d.longitude as number]}
-            radius={9}
+            radius={7}
             pathOptions={{
               color: STATUS_COLOR[d.status] || STATUS_COLOR.offline,
               fillColor: STATUS_COLOR[d.status] || STATUS_COLOR.offline,
@@ -90,7 +129,7 @@ export const SensorMap: React.FC<SensorMapProps> = ({ devices, height = '300px' 
                 <Link to={`/devices/${d.id}`}>{t('full_detail')}</Link>
               </div>
             </Popup>
-          </CircleMarker>
+          </ZoomableCircleMarker>
         ))}
       </MapContainer>
     </div>

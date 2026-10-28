@@ -66,7 +66,16 @@ export const Sidebar: React.FC = () => {
         <p className={`font-semibold ${isDark ? 'text-slate-400' : 'text-slate-700'}`}>
           {t('network_status')}
         </p>
-        <p className="mt-0.5">{t('developed_by')}</p>
+        <p className="mt-0.5">
+          <a
+            href="https://neutroninsights.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className={`hover:underline ${isDark ? 'text-slate-500 hover:text-cyan-400' : 'text-slate-500 hover:text-cyan-600'}`}
+          >
+            {t('developed_by')}
+          </a>
+        </p>
       </div>
     </aside>
   );
