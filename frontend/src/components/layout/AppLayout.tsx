@@ -90,7 +90,7 @@ export const AppLayout: React.FC = () => {
               </span>
               <button
                 onClick={() => setDrawerOpen(false)}
-                aria-label="Close"
+                aria-label={t('close')}
                 className={`p-2 rounded-lg transition ${
                   isDark ? 'hover:bg-white/10 text-slate-300' : 'hover:bg-slate-100 text-slate-600'
                 }`}

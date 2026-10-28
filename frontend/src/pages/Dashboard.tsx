@@ -24,7 +24,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
-import { es, enUS } from 'date-fns/locale';
+import { getDateLocale } from '../utils/dateLocale';
 import { batteryPercent, isLowBattery } from '../utils/battery';
 import { deviceStatusLabel, severityLabel } from '../utils/labels';
 import { normalizeAlertEvent } from '../utils/realtime';
@@ -42,7 +42,7 @@ export const Dashboard: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [chartLoading, setChartLoading] = useState<boolean>(false);
 
-  const dateLocale = language === 'en' ? enUS : es;
+  const dateLocale = getDateLocale(language);
 
   // Cargar datos — solo catálogo y alertas; el histórico del gráfico se carga
   // bajo demanda según el sensor visible seleccionado. `silent` evita el
@@ -361,7 +361,7 @@ export const Dashboard: React.FC = () => {
                       const prev = chartIndex <= 0 ? visibleDevices.length - 1 : chartIndex - 1;
                       setGlobalDeviceId(visibleDevices[prev].id);
                     }}
-                    aria-label="Anterior"
+                    aria-label={t('previous')}
                     className={`p-1.5 rounded-lg border transition ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-600 hover:text-slate-900'}`}
                   >
                     <ChevronLeft className="w-4 h-4" />
@@ -374,7 +374,7 @@ export const Dashboard: React.FC = () => {
                       const next = (chartIndex + 1) % visibleDevices.length;
                       setGlobalDeviceId(visibleDevices[next].id);
                     }}
-                    aria-label="Siguiente"
+                    aria-label={t('next')}
                     className={`p-1.5 rounded-lg border transition ${isDark ? 'bg-slate-800 border-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 border-slate-300 text-slate-600 hover:text-slate-900'}`}
                   >
                     <ChevronRight className="w-4 h-4" />

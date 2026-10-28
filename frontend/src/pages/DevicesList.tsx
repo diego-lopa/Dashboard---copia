@@ -20,7 +20,7 @@ import {
   X,
   Check,
 } from 'lucide-react';
-import { es, enUS } from 'date-fns/locale';
+import { getDateLocale } from '../utils/dateLocale';
 import { formatRelative } from '../utils/dates';
 import { formatBattery } from '../utils/battery';
 import { deviceStatusLabel } from '../utils/labels';
@@ -37,7 +37,7 @@ export const DevicesList: React.FC = () => {
   const [groupFilter, setGroupFilter] = useState('all');
   const [loading, setLoading] = useState(true);
 
-  const dateLocale = language === 'en' ? enUS : es;
+  const dateLocale = getDateLocale(language);
 
   // Activar/desactivar el sensor (ingesta): se hace pulsando su nombre en la
 // lista. Al desactivar, el sensor deja de ingerir y el simulador de datos de
@@ -129,7 +129,7 @@ const applyEnabled = async (dev: Device, enabled: boolean) => {
     try {
       const [nominatim, meteo] = await Promise.all([
         fetch(
-          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10&accept-language=es`,
+          `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10&accept-language=${language}`,
           { headers: { Accept: 'application/json' } },
         ).then((r) => (r.ok ? r.json() : null)),
         fetch(

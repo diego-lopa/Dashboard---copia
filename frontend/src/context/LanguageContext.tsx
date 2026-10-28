@@ -26,6 +26,8 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } else {
       document.documentElement.dir = 'ltr';
     }
+    // Reflect selected language in <html lang>
+    document.documentElement.lang = lang;
   };
 
   useEffect(() => {
@@ -34,6 +36,7 @@ export const LanguageProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     } else {
       document.documentElement.dir = 'ltr';
     }
+    document.documentElement.lang = language;
   }, [language]);
 
   const t = (key: string): string => {

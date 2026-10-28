@@ -20,6 +20,11 @@ export const LANGUAGES: LanguageOption[] = [
 export const translations: Record<LanguageCode, Record<string, string>> = {
     es: {
         system_name: 'CORNEA',
+        menu: 'Menú',
+        close: 'Cerrar',
+        previous: 'Anterior',
+        next: 'Siguiente',
+        active_alerts: 'alertas activas',
         developed_by: 'Desarrollado por Neutron Insights',
         by_neutron: 'by Neutron Insights',
         subtitle: 'Plataforma Autoalojada de Telemetría Time-Series & Red LoRaWAN',
@@ -291,6 +296,11 @@ export const translations: Record<LanguageCode, Record<string, string>> = {
     },
     en: {
         system_name: 'CORNEA',
+        menu: 'Menu',
+        close: 'Close',
+        previous: 'Previous',
+        next: 'Next',
+        active_alerts: 'active alerts',
         developed_by: 'Developed by Neutron Insights',
         by_neutron: 'by Neutron Insights',
         subtitle: 'Self-hosted Time-Series Telemetry & LoRaWAN Network Platform',

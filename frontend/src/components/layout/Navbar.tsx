@@ -13,6 +13,7 @@ import {
   ChevronDown,
   AlertTriangle,
   Menu,
+  Check,
 } from 'lucide-react';
 import { Logo } from './Logo';
 
@@ -68,8 +69,8 @@ export const Navbar: React.FC<NavbarProps> = ({
         {/* Hamburger solo en móvil: abre el panel lateral */}
         <button
           onClick={onMenuClick}
-          title="Menu"
-          aria-label="Menu"
+          title={t('menu')}
+          aria-label={t('menu')}
           className={`md:hidden p-2 -ml-1 rounded-lg transition shrink-0 ${
             isDark
               ? 'hover:bg-white/10 text-slate-300 hover:text-white'
@@ -195,7 +196,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   >
                     <span>{lang.nativeName}</span>
                     {language === lang.code && (
-                      <span className="ml-auto text-[10px] bg-emerald-500/20 text-emerald-500 rounded px-1 py-0.5 font-bold">✓</span>
+                      <Check className="ml-auto w-3.5 h-3.5 text-emerald-500" />
                     )}
                   </button>
                 ))}
@@ -209,7 +210,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             id="btn-alert-bell"
             onClick={handleAlertClick}
-            title={activeAlertCount > 0 ? `${activeAlertCount} alertas activas` : t('no_alerts')}
+            title={activeAlertCount > 0 ? `${activeAlertCount} ${t('active_alerts')}` : t('no_alerts')}
             className={`p-2 rounded-lg transition relative ${
               isDark
                 ? 'bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10'

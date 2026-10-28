@@ -242,4 +242,37 @@
   .dark .kpi-stripe-bg {
     background-image: repeating-linear-gradient(45deg, #fca5a5 0 7px, #334155 7px 14px);
   }
+
+/* ===== Light mode contrast hardening ===== */
+/* Darken low-contrast text utilities when the `light` theme is active so that
+   every element keeps dark text on light backgrounds. */
+html.light .text-slate-200 { color: #475569 !important; }
+html.light .text-slate-300 { color: #475569 !important; }
+html.light .text-slate-400 { color: #475569 !important; }
+html.light .text-slate-500 { color: #334155 !important; }
+
+html.light .text-emerald-300,
+html.light .text-emerald-400 { color: #059669 !important; }
+html.light .text-cyan-300,
+html.light .text-cyan-400 { color: #0891b2 !important; }
+html.light .text-amber-300,
+html.light .text-amber-400 { color: #d97706 !important; }
+html.light .text-rose-300,
+html.light .text-rose-400 { color: #e11d48 !important; }
+html.light .text-blue-300,
+html.light .text-blue-400 { color: #2563eb !important; }
+html.light .text-purple-300,
+html.light .text-purple-400 { color: #7c3aed !important; }
+html.light .text-red-300,
+html.light .text-red-400 { color: #dc2626 !important; }
+html.light .text-orange-300,
+html.light .text-orange-400 { color: #ea580c !important; }
+html.light .text-teal-300,
+html.light .text-teal-400 { color: #0d9488 !important; }
+html.light .text-indigo-300,
+html.light .text-indigo-400 { color: #4f46e5 !important; }
+
+/* Muted glass surfaces a bit more opaque in light mode for readability */
+html.light .glass-card { background-color: rgba(255, 255, 255, 0.85) !important; }
+html.light .glass-panel { background-color: rgba(255, 255, 255, 0.9) !important; }
 }
