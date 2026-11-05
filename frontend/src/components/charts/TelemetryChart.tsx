@@ -45,6 +45,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
 
   const option: any = {
     backgroundColor: 'transparent',
+    animation: false,
     ...(title
       ? {
           title: {
@@ -93,7 +94,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
     grid: {
       left: '8%',
       right: '8%',
-      bottom: '30%',
+      bottom: '34%',
       top: title ? '16%' : '8%',
       containLabel: true,
     },
@@ -277,7 +278,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   };
 
   return (
-    <div className="w-full h-80 overflow-hidden">
+    <div className="w-full h-96 overflow-hidden">
       <ReactECharts
         option={option}
         style={{ height: '100%', width: '100%' }}
