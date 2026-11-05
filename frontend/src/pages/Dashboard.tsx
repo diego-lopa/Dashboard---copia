@@ -411,7 +411,7 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* Mini Geospatial Map */}
-        <div className="glass-panel p-5 rounded-2xl border flex flex-col justify-between">
+        <div className="glass-panel p-5 rounded-2xl border flex flex-col h-full">
           <div className="flex items-center justify-between mb-3">
             <div>
               <h3 className={`text-sm font-semibold ${isDark ? 'text-white' : 'text-slate-900'}`}>{t('geolocation')}</h3>
@@ -425,7 +425,9 @@ export const Dashboard: React.FC = () => {
               <ArrowUpRight className="w-3.5 h-3.5" />
             </Link>
           </div>
-          <SensorMap devices={visibleDevices} height="300px" />
+          <div className="flex-1 min-h-0">
+            <SensorMap devices={visibleDevices} height="100%" />
+          </div>
         </div>
       </div>
 

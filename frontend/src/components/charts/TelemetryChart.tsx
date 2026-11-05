@@ -89,12 +89,12 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
       pageIconColor: '#10B981',
       pageIconInactiveColor: isDark ? '#475569' : '#CBD5E1',
       left: 'center',
-      bottom: '9%',
+      bottom: '12%',
     },
     grid: {
       left: '8%',
       right: '8%',
-      bottom: '34%',
+      bottom: '28%',
       top: title ? '16%' : '8%',
       containLabel: true,
     },
@@ -110,8 +110,8 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
         start: 0,
         end: 100,
         filterMode: 'none',
-        height: 18,
-        bottom: '0%',
+        height: 20,
+        bottom: '2%',
         borderColor: isDark ? '#334155' : '#CBD5E1',
         backgroundColor: isDark ? '#111827' : '#F1F5F9',
         fillerColor: 'rgba(16, 185, 129, 0.15)',
@@ -278,7 +278,7 @@ export const TelemetryChart: React.FC<TelemetryChartProps> = ({
   };
 
   return (
-    <div className="w-full h-96 overflow-hidden">
+    <div className="w-full h-[420px] overflow-hidden">
       <ReactECharts
         option={option}
         style={{ height: '100%', width: '100%' }}
